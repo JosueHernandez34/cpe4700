@@ -4,6 +4,7 @@
 #include <unistd.h>
 #include <pthread.h>
 #include <stdatomic.h>
+#include <sched.h>
 #include <gpiod.h>
 #include <time.h>
 #include "encoder.h"
@@ -120,6 +121,8 @@ static void *encoder_worker(void *arg)
     struct gpiod_line_event event;
     struct timespec timeout = {0, 100000000}; // 100 ms poll timeout
 
+    static struct timespec last_edge_ts[2] = {{0, 0}, {0, 0}};
+
     while (atomic_load(&running))
     {
         int event_status = gpiod_line_event_wait(line_a[encoder_id], &timeout);
@@ -132,13 +135,32 @@ static void *encoder_worker(void *arg)
             int state_a = (event.event_type == GPIOD_LINE_EVENT_RISING_EDGE) ? 1 : 0;
             int state_b = gpiod_line_get_value(line_b[encoder_id]);
 
-            // TODO: use state_a and state_b to determine direction
-            //       and update encoder_count[encoder_id] with
-            //       atomic_fetch_add/atomic_fetch_sub
+            if (state_a == 1 && state_b == 1) {
+                atomic_fetch_add(&encoder_count[encoder_id], 1);
+            }
+            else if (state_a == 1 && state_b == 0) {
+                atomic_fetch_sub(&encoder_count[encoder_id], 1);
+            }
+            else if (state_a == 0 && state_b == 1) {
+                atomic_fetch_sub(&encoder_count[encoder_id], 1);
+            }
+            else {
+                atomic_fetch_add(&encoder_count[encoder_id], 1);
+            }
 
-            // TODO: use event.ts and the time since the previous edge
-            //       to compute instantaneous speed, then
-            //       atomic_store() it into encoder_speed[encoder_id]
+            struct timespec now = event.ts;
+            if (last_edge_ts[encoder_id].tv_sec != 0 || last_edge_ts[encoder_id].tv_nsec != 0) {
+                long seconds = now.tv_sec - last_edge_ts[encoder_id].tv_sec;
+                long nanoseconds = now.tv_nsec - last_edge_ts[encoder_id].tv_nsec;
+                double delta_s = (double)seconds + ((double)nanoseconds / 1000000000.0);
+
+                if (delta_s > 0.0) {
+                    double revolutions_per_second = 1.0 / delta_s;
+                    atomic_store(&encoder_speed[encoder_id], revolutions_per_second);
+                }
+            }
+
+            last_edge_ts[encoder_id] = now;
         }
     }
 

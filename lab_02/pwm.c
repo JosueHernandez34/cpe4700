@@ -1,103 +1,201 @@
-#include <stdio.h>
-#include <stdlib.h>
-#include <unistd.h>
+#define _XOPEN_SOURCE 700
+
+#include <errno.h>
 #include <fcntl.h>
 #include <gpiod.h>
+#include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+#include <unistd.h>
+
 #include "pwm.h"
 
-// add definitions for the PWM chips and channels
-static const int PWM_CHIP2 = 2;
-static const int PWM_CHIP3 = 3;
-static const int PWM0 = 0;
+static struct gpiod_chip *chip = NULL;
+static struct gpiod_line *dir_line[PWM_CHANNEL_COUNT] = {NULL, NULL};
 
-// GPIO direction line definitions (gpiochip0)
-#define GPIO_CHIP "/dev/gpiochip0"
-#define DIR_LINE_OFFSET  106  // channel 0 direction
-#define DIR_LINE_OFFSET2 113  // channel 1 direction
-
-static struct gpiod_chip *chip;
-static struct gpiod_line *dir_line[2];
-
-// Helper function to write values to sysfs files
 static int write_sysfs(const char *path, const char *value)
 {
     int fd = open(path, O_WRONLY);
-    if (fd < 0) return -1;
-    if (write(fd, value, strlen(value)) < 0) {
+    if (fd < 0) {
+        return -1;
+    }
+
+    size_t len = strlen(value);
+    if (write(fd, value, len) != (ssize_t)len) {
         close(fd);
         return -1;
     }
+
     close(fd);
     return 0;
 }
 
+static const char *pwm_chip_path(int channel)
+{
+    if (channel == 0) {
+        return PWM_CHIP_PATH2;
+    }
+    if (channel == 1) {
+        return PWM_CHIP_PATH3;
+    }
+    return NULL;
+}
+
+static const char *pwm_export_path(int channel)
+{
+    if (channel == 0) {
+        return PWM_CHIP_PATH2 "/export";
+    }
+    if (channel == 1) {
+        return PWM_CHIP_PATH3 "/export";
+    }
+    return NULL;
+}
+
+static const char *pwm_unexport_path(int channel)
+{
+    if (channel == 0) {
+        return PWM_CHIP_PATH2 "/unexport";
+    }
+    if (channel == 1) {
+        return PWM_CHIP_PATH3 "/unexport";
+    }
+    return NULL;
+}
+
+static int pwm_dir_line_offset(int channel)
+{
+    if (channel == 0) {
+        return DIR_LINE_OFFSET;
+    }
+    if (channel == 1) {
+        return DIR_LINE_OFFSET2;
+    }
+    return -1;
+}
+
 int pwm_init(void)
 {
-    // Use the definitions above to initialize the PWM channels
-    // Example of exporting a PWM channel:
-    // Note that exporting takes significant background time, so
-    // a delay is often necessary after writing to the export
-    // file.
-    //
-    if (access(PWM_PATH, F_OK) != 0)
-    {
-       write_sysfs(PWM_CHIP_PATH "/export", PWM_CHANNEL);
-       usleep(100000);
+    char path[128];
+    int channel;
+
+    for (channel = 0; channel < PWM_CHANNEL_COUNT; channel++) {
+        const char *chip_path = pwm_chip_path(channel);
+        if (chip_path == NULL) {
+            return -1;
+        }
+
+        snprintf(path, sizeof(path), "%s/pwm0", chip_path);
+        if (access(path, F_OK) != 0) {
+            if (write_sysfs(pwm_export_path(channel), PWM_CHANNEL) != 0) {
+                return -1;
+            }
+            struct timespec ts = {0, 100000000L};
+            nanosleep(&ts, NULL);
+        }
+
+        snprintf(path, sizeof(path), "%s/pwm0/period", chip_path);
+        if (write_sysfs(path, "100000") != 0) {
+            return -1;
+        }
+
+        snprintf(path, sizeof(path), "%s/pwm0/duty_cycle", chip_path);
+        if (write_sysfs(path, "0") != 0) {
+            return -1;
+        }
+
+        snprintf(path, sizeof(path), "%s/pwm0/enable", chip_path);
+        if (write_sysfs(path, "1") != 0) {
+            return -1;
+        }
     }
-    TODO: export channels
 
-    // set the PWM period in nanoseconds. (10kHz max)
-    // Write a string representing the period in nanoseconds to
-    // the period file.
-    // TODO: configure period
+    chip = gpiod_chip_open(GPIO_CHIP);
+    if (chip == NULL) {
+        return -1;
+    }
 
-    // Initialize the duty cycle to 0 for all channels. Write
-    // "0" to the duty_cycle file.
-    // TODO: set initial duty cycle
+    for (channel = 0; channel < PWM_CHANNEL_COUNT; channel++) {
+        int offset = pwm_dir_line_offset(channel);
+        if (offset < 0) {
+            return -1;
+        }
 
-    // Enable the PWM channels by writing "1" to the enable
-    // file for each channel.
-    // TODO: enable channels
+        dir_line[channel] = gpiod_chip_get_line(chip, offset);
+        if (dir_line[channel] == NULL) {
+            return -1;
+        }
 
-    // TODO: open the GPIO chip with 
-    //       gpiod_chip_open(GPIO_CHIP)
-    // TODO: get the two direction lines with
-    //       gpiod_chip_get_line() using
-    //       DIR_LINE_OFFSET and DIR_LINE_OFFSET2, storing
-    //       them in dir_line[0] and dir_line[1]
-    // TODO: request each line as an output with
-    //       gpiod_line_request_output()
+        if (gpiod_line_request_output(dir_line[channel], "motor_dir", 0) != 0) {
+            return -1;
+        }
+    }
+
     return 0;
 }
-// duty cycle setter. duty_cycle is a float between -1.0 and 1.0
-// Positive values should drive the motor in the positive direction.
+
 int pwm_set_duty(int channel, float duty_cycle)
 {
-    // TODO: set the direction output for this channel based on
-    //       the sign of duty_cycle using 
-    //       gpiod_line_set_value(dir_line[channel], ...).
-    //       Drive the line high (1) for positive duty_cycle,
-    //       low (0) for negative.
-    // TODO: take the absolute value of duty_cycle so that only
-    //       a positive value is ever written to the PWM
-    //       duty_cycle file.
-    // TODO: use one of the two sysfs paths based on channel
-    // TODO: write duty cycle value 
-    // Example:
-    // char duty_cycle_str[20];
-    // snprintf(duty_cycle_str, sizeof(duty_cycle_str), "%d",
-    //         (int)(duty_cycle * PWM_PERIOD_NS));
-    // TODO: write duty_cycle_str to the appropriate sysfs
-    //       duty_cycle file
-    return 0;
+    char duty_cycle_str[32];
+    char path[128];
+    float magnitude;
+    int direction;
+
+    if (channel < 0 || channel >= PWM_CHANNEL_COUNT) {
+        return -1;
+    }
+    if (dir_line[channel] == NULL) {
+        return -1;
+    }
+
+    if (duty_cycle > 1.0f) {
+        duty_cycle = 1.0f;
+    } else if (duty_cycle < -1.0f) {
+        duty_cycle = -1.0f;
+    }
+
+    direction = (duty_cycle >= 0.0f) ? 1 : 0;
+    if (gpiod_line_set_value(dir_line[channel], direction) != 0) {
+        return -1;
+    }
+
+    magnitude = fabsf(duty_cycle);
+    snprintf(duty_cycle_str, sizeof(duty_cycle_str), "%d", (int)(magnitude * (float)PWM_PERIOD_NS));
+
+    snprintf(path, sizeof(path), "%s/pwm0/duty_cycle", pwm_chip_path(channel));
+    return write_sysfs(path, duty_cycle_str);
 }
 
 int pwm_cleanup(void)
 {
-    // TODO: disable channels
-    // TODO: unexport channels
-    // TODO: release the direction lines with 
-    //       gpiod_line_release() and close the chip with
-    //  gpiod_chip_close(chip)
+    char path[128];
+    int channel;
+
+    for (channel = 0; channel < PWM_CHANNEL_COUNT; channel++) {
+        snprintf(path, sizeof(path), "%s/pwm0/enable", pwm_chip_path(channel));
+        write_sysfs(path, "0");
+
+        snprintf(path, sizeof(path), "%s/pwm0/duty_cycle", pwm_chip_path(channel));
+        write_sysfs(path, "0");
+
+        if (dir_line[channel] != NULL) {
+            gpiod_line_release(dir_line[channel]);
+            dir_line[channel] = NULL;
+        }
+
+        if (write_sysfs(pwm_unexport_path(channel), PWM_CHANNEL) != 0) {
+            if (errno == ENOENT) {
+                continue;
+            }
+        }
+    }
+
+    if (chip != NULL) {
+        gpiod_chip_close(chip);
+        chip = NULL;
+    }
+
     return 0;
 }
