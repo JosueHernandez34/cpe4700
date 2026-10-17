@@ -10,13 +10,19 @@ clear; clc;
 KP = 0.005;  KI = 0.020;           % gains currently in modules/speed_control.c
 
 %% Deadband (offsets) ----------------------------------------------------
-db = readtable('deadband.csv');
-dbpos = nan(1, 2);  dbneg = nan(1, 2);
-for w = 0:1
-    p = db.deadband_duty(db.motor == w & strcmp(db.direction, 'positive'));
-    n = db.deadband_duty(db.motor == w & strcmp(db.direction, 'negative'));
-    if ~isempty(p), dbpos(w+1) = p(1);      end
-    if ~isempty(n), dbneg(w+1) = abs(n(1)); end   % controller wants a magnitude
+dbpos = nan(1, 2);  dbneg = nan(1, 2);  db = table();
+if isfile('deadband.csv')
+    db = readtable('deadband.csv');
+else
+    warning('deadband.csv not found -- run "sudo ./lab04 deadband" to create it.');
+end
+if ~isempty(db)
+    for w = 0:1
+        p = db.deadband_duty(db.motor == w & strcmp(db.direction, 'positive'));
+        n = db.deadband_duty(db.motor == w & strcmp(db.direction, 'negative'));
+        if ~isempty(p), dbpos(w+1) = p(1);      end
+        if ~isempty(n), dbneg(w+1) = abs(n(1)); end   % controller wants a magnitude
+    end
 end
 fprintf('Deadband (duty)   wheel0   wheel1\n');
 fprintf('  positive        %.2f     %.2f\n', dbpos);
