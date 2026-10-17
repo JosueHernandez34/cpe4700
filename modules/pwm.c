@@ -15,6 +15,10 @@
 static struct gpiod_chip *chip = NULL;
 static struct gpiod_line *dir_line[PWM_CHANNEL_COUNT] = {NULL, NULL};
 
+/* The two motors are mounted as mirror images. Invert wheel 0's direction line
+ * so that +duty spins both wheels the same way (and both encoders count up). */
+static const int dir_invert[PWM_CHANNEL_COUNT] = {1, 0};
+
 static int write_sysfs(const char *path, const char *value)
 {
     int fd = open(path, O_WRONLY);
@@ -157,6 +161,9 @@ int pwm_set_duty(int channel, float duty_cycle)
     }
 
     direction = (duty_cycle >= 0.0f) ? 1 : 0;
+    if (dir_invert[channel]) {
+        direction = !direction;
+    }
     if (gpiod_line_set_value(dir_line[channel], direction) != 0) {
         return -1;
     }
