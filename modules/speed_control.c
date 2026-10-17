@@ -49,17 +49,8 @@ void speed_control(int motor, double target_speed)
     if (motor < 0 || motor >= NUM_MOTORS)
         return;
 
-    /*
-     * TODO (important): enc_get_speed() in modules is UNSIGNED -- it is
-     * 1/(time between A edges), so it never goes negative and it never
-     * decays to 0 when the wheel stops (last edge value is held).
-     * To track a +100 -> -100 triangle you need a SIGNED speed.
-     * Options:
-     *   (a) fix the encoder module on lab_04 (sign from count delta, and
-     *       zero the speed if no edge in ~50 ms), commit + merge to main
-     *   (b) compute speed here from enc_get_count() differences
-     * Until you do, this uses the raw value so the file compiles.
-     */
+    /* enc_get_speed() is signed (A-edges/s, negative in reverse) and reads
+     * 0 when no edge has arrived for ~50 ms, so it can track +/- targets. */
     double measured = enc_get_speed(motor);
 
     double error = target_speed - measured;
