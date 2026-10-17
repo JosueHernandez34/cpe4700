@@ -1,49 +1,69 @@
 #!/usr/bin/env python3
 """Post-lab analysis. Run from lab_04/ after collecting the CSVs:
     python3 analyze.py
-Produces step_response.png and speed_control.png (do NOT submit the CSVs)."""
+Produces step_response.png and speed_control.png (do NOT submit the CSVs).
+Every metric is computed for both wheels (0 and 1) so they can be compared."""
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+
+WHEELS = (0, 1)
 
 # ---------------- Step response ----------------
 df = pd.read_csv("step_response.csv")
 t = df.time_ms / 1000.0
 
-fig, (a1, a2) = plt.subplots(2, 1, sharex=True, figsize=(9, 6))
-a1.plot(t, df.duty_cycle); a1.set_ylabel("duty cycle")
-a2.plot(t, df.speed);      a2.set_ylabel("speed (encoder units)")
-a2.set_xlabel("time (s)"); a1.set_title("Step response")
-for a in (a1, a2): a.grid(True)
+fig, axes = plt.subplots(3, 1, sharex=True, figsize=(9, 8))
+axes[0].plot(t, df.duty_cycle); axes[0].set_ylabel("duty cycle")
+axes[0].set_title("Step response, both wheels")
+for w in WHEELS:
+    axes[1].plot(t, df[f"speed_{w}"], label=f"wheel {w}")
+    axes[2].plot(t, df[f"position_{w}"], label=f"wheel {w}")
+axes[1].set_ylabel("speed (encoder edges/s)")
+axes[2].set_ylabel("position (counts)"); axes[2].set_xlabel("time (s)")
+for a in axes:
+    a.grid(True)
+axes[1].legend(); axes[2].legend()
 fig.savefig("step_response.png", dpi=150)
 
-def step_metrics(t0, t1, duty):
+def step_metrics(w, t0, t1, duty):
     """Rise (10-90%), settling (within 2% of final), steady-state, gain.
-    t0/t1: window of the step in seconds. TODO: adjust if your timing differs."""
+    t0/t1: window of the step in seconds. TODO: adjust if your timing differs.
+    Speed is flipped to the direction of travel first, so forward and
+    reverse (and a wheel that is mirrored) use the same formulas."""
     m = (t >= t0) & (t < t1)
-    ts, s = t[m].values, df.speed[m].values
+    ts, s = t[m].values, df[f"speed_{w}"][m].values
     ss = np.mean(s[-100:])                      # last 100 ms = steady state
-    rise = ts[np.argmax(s >= 0.9*ss)] - ts[np.argmax(s >= 0.1*ss)]
-    out = np.where(np.abs(s - ss) > 0.02*abs(ss))[0]
+    sn = s * np.sign(ss)
+    mag = abs(ss)
+    rise = ts[np.argmax(sn >= 0.9*mag)] - ts[np.argmax(sn >= 0.1*mag)]
+    out = np.where(np.abs(sn - mag) > 0.02*mag)[0]
     settle = ts[out[-1]] - t0 if len(out) else 0.0
     return dict(steady_state=ss, rise_s=rise, settle_s=settle,
                 gain_speed_per_duty=ss/duty)
 
-# Windows from the Part 6 sequence (starts at 1 s, 4 s, 5 s)
-print("forward:", step_metrics(1.0, 2.0, +0.60))
-# TODO: reverse window uses negative speeds only if you sign the speed
-print("reverse:", step_metrics(4.0, 5.0, -0.60))
-
-# Encoder noise: std dev of speed during a steady window
-m = (t >= 1.5) & (t < 2.0)
-print("noise std (steady fwd):", df.speed[m].std())
+# Windows from the Part 6 sequence (steps start at 1 s, 4 s, 5 s)
+for w in WHEELS:
+    print(f"--- wheel {w} ---")
+    print("forward :", step_metrics(w, 1.0, 2.0, +0.60))
+    print("reverse :", step_metrics(w, 4.0, 5.0, -0.60))
+    print("forward2:", step_metrics(w, 5.0, 6.0, +0.60))
+    # Encoder noise: std dev of speed during a steady window, and at rest
+    m = (t >= 1.5) & (t < 2.0)
+    r = (t >= 0.0) & (t < 1.0)
+    print("noise std (steady fwd):", df[f"speed_{w}"][m].std(),
+          "| at rest:", df[f"speed_{w}"][r].std())
 
 # ---------------- Triangular speed control ----------------
 sc = pd.read_csv("speed_control.csv")
-plt.figure(figsize=(10, 4))
-plt.plot(sc.time_ms/1000, sc.target_speed,   label="target")
-plt.plot(sc.time_ms/1000, sc.measured_speed, label="measured")
-plt.xlabel("time (s)"); plt.ylabel("speed"); plt.legend(); plt.grid(True)
-plt.title("Triangular speed reference, 3 cycles")
-plt.savefig("speed_control.png", dpi=150)
-print("cycles:", sc.time_ms.max()/2000)
+fig, axes = plt.subplots(len(WHEELS), 1, sharex=True, figsize=(10, 7))
+for w, a in zip(WHEELS, axes):
+    a.plot(sc.time_ms/1000, sc.target_speed, label="target")
+    a.plot(sc.time_ms/1000, sc[f"measured_speed_{w}"], label="measured")
+    a.set_ylabel(f"wheel {w} speed"); a.legend(); a.grid(True)
+    rms = np.sqrt(np.mean((sc.target_speed - sc[f"measured_speed_{w}"])**2))
+    print(f"wheel {w} RMS tracking error: {rms:.2f}")
+axes[0].set_title("Triangular speed reference, 3 cycles")
+axes[-1].set_xlabel("time (s)")
+fig.savefig("speed_control.png", dpi=150)
+print("cycles:", len(sc) / 2000)

@@ -1,11 +1,14 @@
 /*
- * main.c -- Lab 04: Motor step-response characterization
+ * main.c -- Lab 04: Motor step-response characterization (both wheels)
  *
- * Usage:  ./lab04 deadband | step | speed     [motor]   (motor defaults to 0)
+ * Usage:  ./lab04 deadband | step | speed
  *
- *   deadband : Part 3  -- ramp duty in 0.02 steps, you note when wheel moves
- *   step     : Parts 4-6 -- run the step sequence, log step_response.csv
- *   speed    : Part 7  -- triangular reference, log speed_control.csv
+ *   deadband : Part 3  -- ramp duty in 0.02 steps, one wheel at a time,
+ *              reports each wheel's positive/negative deadband
+ *   step     : Parts 4-6 -- run the step sequence on both wheels at once,
+ *              log step_response.csv
+ *   speed    : Part 7  -- triangular reference on both wheels at once,
+ *              log speed_control.csv
  *
  * Robot must be on a book with wheels off the ground. Ctrl-C stops safely.
  */
@@ -22,6 +25,7 @@
 #include "encoder.h"
 #include "speed_control.h"
 
+#define NUM_MOTORS   2
 #define LOOP_NS      1000000L     /* 1 ms loop period */
 #define STEP_DUTY    0.60         /* Part 4 */
 #define DB_STEP      0.02         /* Part 3 increment */
@@ -45,52 +49,65 @@ static void tick(struct timespec *next)
     clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, next, NULL);
 }
 
-/* ------------------------------------------------------------------ */
-/* Part 3: deadband. Prints speed at each duty so you can read the     */
-/* smallest duty where the wheel starts to move.                       */
-/* ------------------------------------------------------------------ */
-static void run_deadband(int motor)
+static void stop_all(void)
 {
-    for (int dir = 1; dir >= -1 && running; dir -= 2) {      /* +, then - */
-        printf("%s sweep:\n", dir > 0 ? "Positive" : "Negative");
-        double found = 0.0;
+    for (int m = 0; m < NUM_MOTORS; m++)
+        pwm_set_duty(m, 0.0f);
+}
 
-        for (int i = 0; i <= 50 && running; i++) {
-            double duty = dir * i * DB_STEP;
-            pwm_set_duty(motor, (float)duty);
+/* ------------------------------------------------------------------ */
+/* Part 3: deadband. Each wheel is swept alone (the other stays at 0)  */
+/* so one wheel's load can't affect the other's threshold.             */
+/* ------------------------------------------------------------------ */
+static void run_deadband(void)
+{
+    for (int motor = 0; motor < NUM_MOTORS && running; motor++) {
+        for (int dir = 1; dir >= -1 && running; dir -= 2) {      /* +, then - */
+            printf("Motor %d, %s sweep:\n", motor, dir > 0 ? "positive" : "negative");
+            int    found = 0;
+            double found_duty = 0.0;
 
-            /* Movement is judged from encoder count travel, not enc_get_speed():
-             * the module's speed is unsigned and holds the last edge's value
-             * after the wheel stops, so it would look "moving" at duty 0. */
-            int start = enc_get_count(motor);
-            struct timespec next;
-            clock_gettime(CLOCK_MONOTONIC, &next);
-            for (int ms = 0; ms < DB_DWELL_MS && running; ms++)
-                tick(&next);
-            int travel = abs(enc_get_count(motor) - start);
-            printf("  duty=%+.2f  count_travel=%d\n", duty, travel);
+            for (int i = 1; i <= 50 && running; i++) {
+                double duty = dir * i * DB_STEP;
+                pwm_set_duty(motor, (float)duty);
 
-            if (i > 0 && travel >= DB_MOVE_COUNTS) {
-                found = duty;
-                break;                       /* stop at first movement */
+                /* Movement is judged from encoder count travel, not enc_get_speed(),
+                 * so a stopped wheel can't look "moving" from a stale speed. */
+                int start = enc_get_count(motor);
+                struct timespec next;
+                clock_gettime(CLOCK_MONOTONIC, &next);
+                for (int ms = 0; ms < DB_DWELL_MS && running; ms++)
+                    tick(&next);
+                int travel = abs(enc_get_count(motor) - start);
+                printf("  duty=%+.2f  count_travel=%d\n", duty, travel);
+
+                if (travel >= DB_MOVE_COUNTS) {
+                    found = 1;
+                    found_duty = duty;
+                    break;                   /* stop at first movement */
+                }
             }
-        }
-        pwm_set_duty(motor, 0.0f);
-        printf(dir > 0 ? "positive_deadband = %.2f\n"
-                       : "negative_deadband = %.2f\n", found);
+            pwm_set_duty(motor, 0.0f);
+            if (found)
+                printf("motor%d_%s_deadband = %.2f\n", motor,
+                       dir > 0 ? "positive" : "negative", found_duty);
+            else
+                printf("motor%d_%s_deadband = not found\n", motor,
+                       dir > 0 ? "positive" : "negative");
 
-        /* Let the wheel coast to a stop before the reverse sweep. */
-        struct timespec settle = {1, 0};
-        nanosleep(&settle, NULL);
+            /* Let the wheel coast to a stop before the next sweep. */
+            struct timespec settle = {1, 0};
+            nanosleep(&settle, NULL);
+        }
     }
 }
 
 /* ------------------------------------------------------------------ */
-/* Parts 4-6: step response sequence, logged every 1 ms.               */
+/* Parts 4-6: step response sequence, both wheels, logged every 1 ms.  */
 /* ------------------------------------------------------------------ */
 typedef struct { double duty; int ms; } step_t;
 
-static void run_step(int motor)
+static void run_step(void)
 {
     /* Sequence from Part 6. NOTE: the PDF's step 5 says "0.60" with no
      * sign -- almost certainly +0.60. Confirm with your instructor. */
@@ -100,12 +117,12 @@ static void run_step(int motor)
         { 0.0,        2000 },
         { -STEP_DUTY, 1000 },
         { +STEP_DUTY, 1000 },
-        { 0.0,        1000 },   /* TODO: trailing coast time (PDF gives none) */
+        { 0.0,        1000 },   /* trailing coast time (PDF gives none) */
     };
 
     FILE *fp = fopen("step_response.csv", "w");
     if (!fp) { perror("step_response.csv"); return; }
-    fprintf(fp, "time_ms,duty_cycle,speed,position\n");
+    fprintf(fp, "time_ms,duty_cycle,speed_0,position_0,speed_1,position_1\n");
 
     struct timespec next;
     clock_gettime(CLOCK_MONOTONIC, &next);
@@ -113,29 +130,31 @@ static void run_step(int motor)
 
     for (size_t s = 0; s < sizeof seq / sizeof seq[0] && running; s++) {
         double duty = seq[s].duty;
-        pwm_set_duty(motor, (float)duty);
+        for (int m = 0; m < NUM_MOTORS; m++)
+            pwm_set_duty(m, (float)duty);
 
         for (int i = 0; i < seq[s].ms && running; i++, t_ms++) {
-            double speed = enc_get_speed(motor);
-            int    pos   = enc_get_count(motor);   /* lab calls this enc_get_position */
-            fprintf(fp, "%d,%f,%f,%d\n", t_ms, duty, speed, pos);
+            fprintf(fp, "%d,%f,%f,%d,%f,%d\n", t_ms, duty,
+                    enc_get_speed(0), enc_get_count(0),    /* lab calls this enc_get_position */
+                    enc_get_speed(1), enc_get_count(1));
             tick(&next);
         }
     }
-    pwm_set_duty(motor, 0.0f);
+    stop_all();
     fclose(fp);
     printf("Wrote step_response.csv (%d rows)\n", t_ms);
 }
 
 /* ------------------------------------------------------------------ */
-/* Part 7: triangular speed reference, 3 cycles, closed loop.          */
+/* Part 7: triangular speed reference, 3 cycles, closed loop on both   */
+/* wheels (same target, independent controller state per wheel).       */
 /* ------------------------------------------------------------------ */
-static void run_speed(int motor)
+static void run_speed(void)
 {
     speed_control_init();
     FILE *speed_log = fopen("speed_control.csv", "w");
     if (!speed_log) { perror("speed_control.csv"); return; }
-    fprintf(speed_log, "time_ms,target_speed,measured_speed\n");
+    fprintf(speed_log, "time_ms,target_speed,measured_speed_0,measured_speed_1\n");
 
     const int total_ms = (int)(TRI_CYCLES * TRI_PERIOD_S * 1000.0);
 
@@ -153,23 +172,27 @@ static void run_speed(int motor)
         else
             target_speed = -100.0 + 200.0 * (cycle_time - 1.0);
 
-        double measured_speed = enc_get_speed(motor);
-        speed_control(motor, target_speed);
-        fprintf(speed_log, "%d,%f,%f\n", t_ms, target_speed, measured_speed);
+        double measured_speed[NUM_MOTORS];
+        for (int m = 0; m < NUM_MOTORS; m++) {
+            measured_speed[m] = enc_get_speed(m);
+            speed_control(m, target_speed);
+        }
+        fprintf(speed_log, "%d,%f,%f,%f\n", t_ms, target_speed,
+                measured_speed[0], measured_speed[1]);
         tick(&next);
     }
 
-    speed_control(motor, 0.0);        /* command target 0, then clean up */
+    for (int m = 0; m < NUM_MOTORS; m++)
+        speed_control(m, 0.0);        /* command target 0, then clean up */
     fclose(speed_log);
 }
 
 int main(int argc, char **argv)
 {
     if (argc < 2) {
-        fprintf(stderr, "usage: %s deadband|step|speed [motor]\n", argv[0]);
+        fprintf(stderr, "usage: %s deadband|step|speed\n", argv[0]);
         return 1;
     }
-    int motor = (argc > 2) ? atoi(argv[2]) : 0;
 
     signal(SIGINT, on_sigint);
 
@@ -178,12 +201,13 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    if      (!strcmp(argv[1], "deadband")) run_deadband(motor);
-    else if (!strcmp(argv[1], "step"))     run_step(motor);
-    else if (!strcmp(argv[1], "speed"))    run_speed(motor);
+    if      (!strcmp(argv[1], "deadband")) run_deadband();
+    else if (!strcmp(argv[1], "step"))     run_step();
+    else if (!strcmp(argv[1], "speed"))    run_speed();
     else fprintf(stderr, "unknown mode '%s'\n", argv[1]);
 
     /* Part 8: cleanup */
+    stop_all();
     pwm_cleanup();
     enc_cleanup();
     speed_control_cleanup();   /* note: PWM already torn down; harmless if it errors */
