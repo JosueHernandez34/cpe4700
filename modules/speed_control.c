@@ -23,9 +23,9 @@
 #define NUM_MOTORS 2
 #define DT         0.001      /* loop period, seconds (1 ms) */
 
-/* ---- TODO: fill in from your Part 3 / Part 6 results ------------------ */
-#define DEADBAND_POS   0.00   /* TODO: positive_deadband (duty, e.g. 0.12) */
-#define DEADBAND_NEG   0.00   /* TODO: negative_deadband (magnitude)       */
+/* ---- TODO: fill in from your Part 3 results, one entry per wheel -------- */
+static const double DEADBAND_POS[NUM_MOTORS] = { 0.00, 0.00 };  /* positive_deadband */
+static const double DEADBAND_NEG[NUM_MOTORS] = { 0.00, 0.00 };  /* negative_deadband (magnitude) */
 
 /* ---- TODO: tune. Start with KI = 0, raise KP until it tracks, then add KI.
  * Units: duty per (speed unit). Your speed units are whatever
@@ -66,8 +66,8 @@ void speed_control(int motor, double target_speed)
     double u = KP * error + KI * integ[motor];
 
     /* Deadband compensation: push past the dead zone when commanding motion. */
-    if (u > 0.0)       u += DEADBAND_POS;
-    else if (u < 0.0)  u -= DEADBAND_NEG;
+    if (u > 0.0)       u += DEADBAND_POS[motor];
+    else if (u < 0.0)  u -= DEADBAND_NEG[motor];
 
     if (u >  1.0) u =  1.0;
     if (u < -1.0) u = -1.0;
