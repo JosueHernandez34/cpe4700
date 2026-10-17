@@ -7,7 +7,7 @@
 % submitted -- only your plots and report.
 
 clear; clc;
-KP = 0.005;  KI = 0.020;           % gains currently in modules/speed_control.c
+KP = 0.0001; KI = 0.0025;          % gains currently in modules/speed_control.c
 
 %% Deadband (offsets) ----------------------------------------------------
 dbpos = nan(1, 2);  dbneg = nan(1, 2);  db = table();

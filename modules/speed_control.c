@@ -27,11 +27,12 @@
 static const double DEADBAND_POS[NUM_MOTORS] = { 0.00, 0.00 };  /* positive_deadband */
 static const double DEADBAND_NEG[NUM_MOTORS] = { 0.00, 0.00 };  /* negative_deadband (magnitude) */
 
-/* ---- TODO: tune. Start with KI = 0, raise KP until it tracks, then add KI.
- * Units: duty per (speed unit). Your speed units are whatever
- * enc_get_speed() returns -- check them before choosing gains. ---------- */
-#define KP   0.005
-#define KI   0.020
+/* ---- Gains: duty per (edge/s). Starting point from the Lab 04 step response:
+ * plant gain K ~ 6100 edges/s per duty, time constant tau ~ 0.04 s.
+ * KP = 1e-4 gives loop gain K*KP ~ 0.6; KI = KP/tau matches the integral
+ * time to the motor. Adjust from the speed_control.csv results. -------- */
+#define KP   0.0001
+#define KI   0.0025
 
 #define INTEG_LIMIT 1.0       /* clamp on KI*integ contribution */
 
