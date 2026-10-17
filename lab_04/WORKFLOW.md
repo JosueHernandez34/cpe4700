@@ -23,8 +23,11 @@ cd lab_04 && make
 sudo ./lab04 deadband     # note positive_deadband / negative_deadband
 sudo ./lab04 step         # -> step_response.csv
 sudo ./lab04 speed        # -> speed_control.csv
-python3 analyze.py
+python3 analyze.py        # also writes lab04_data.mat
 ```
+MATLAB: copy deadband.csv, step_response.csv, speed_control.csv next to
+`lab04_analysis.m` and run `lab04_analysis` (prints the DEADBAND_* lines to paste
+into `modules/speed_control.c`), or `load('lab04_data.mat')` from analyze.py.
 Add `*.csv` and `lab04` to `.gitignore` (CSVs are not submitted).
 ## 4. Commit and push
 ```

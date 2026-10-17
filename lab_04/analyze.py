@@ -3,9 +3,11 @@
     python3 analyze.py
 Produces step_response.png and speed_control.png (do NOT submit the CSVs).
 Every metric is computed for both wheels (0 and 1) so they can be compared."""
+import os
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+from scipy.io import savemat
 
 WHEELS = (0, 1)
 
@@ -67,3 +69,17 @@ axes[0].set_title("Triangular speed reference, 3 cycles")
 axes[-1].set_xlabel("time (s)")
 fig.savefig("speed_control.png", dpi=150)
 print("cycles:", len(sc) / 2000)
+
+# ---------------- Export for MATLAB ----------------
+# load('lab04_data.mat') gives step, speed_control and deadband structs
+# (one array per CSV column; deadband rows are [motor, duty], NaN = not found).
+mat = {"step": {c: df[c].values for c in df.columns},
+       "speed_control": {c: sc[c].values for c in sc.columns}}
+if os.path.exists("deadband.csv"):
+    db = pd.read_csv("deadband.csv")
+    mat["deadband"] = {
+        "positive": [db[(db.motor == w) & (db.direction == "positive")].deadband_duty.iloc[0] for w in WHEELS],
+        "negative": [abs(db[(db.motor == w) & (db.direction == "negative")].deadband_duty.iloc[0]) for w in WHEELS],
+    }
+savemat("lab04_data.mat", mat)
+print("wrote lab04_data.mat")

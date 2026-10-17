@@ -4,7 +4,8 @@
  * Usage:  ./lab04 deadband | step | speed
  *
  *   deadband : Part 3  -- ramp duty in 0.02 steps, one wheel at a time,
- *              reports each wheel's positive/negative deadband
+ *              reports each wheel's positive/negative deadband and
+ *              writes deadband.csv
  *   step     : Parts 4-6 -- run the step sequence on both wheels at once,
  *              log step_response.csv
  *   speed    : Part 7  -- triangular reference on both wheels at once,
@@ -61,6 +62,10 @@ static void stop_all(void)
 /* ------------------------------------------------------------------ */
 static void run_deadband(void)
 {
+    FILE *db = fopen("deadband.csv", "w");
+    if (!db) { perror("deadband.csv"); return; }
+    fprintf(db, "motor,direction,deadband_duty\n");
+
     for (int motor = 0; motor < NUM_MOTORS && running; motor++) {
         for (int dir = 1; dir >= -1 && running; dir -= 2) {      /* +, then - */
             printf("Motor %d, %s sweep:\n", motor, dir > 0 ? "positive" : "negative");
@@ -88,18 +93,25 @@ static void run_deadband(void)
                 }
             }
             pwm_set_duty(motor, 0.0f);
-            if (found)
+            if (found) {
                 printf("motor%d_%s_deadband = %.2f\n", motor,
                        dir > 0 ? "positive" : "negative", found_duty);
-            else
+                fprintf(db, "%d,%s,%.2f\n", motor,
+                        dir > 0 ? "positive" : "negative", found_duty);
+            } else {
                 printf("motor%d_%s_deadband = not found\n", motor,
                        dir > 0 ? "positive" : "negative");
+                fprintf(db, "%d,%s,NaN\n", motor,
+                        dir > 0 ? "positive" : "negative");
+            }
+            fflush(db);
 
             /* Let the wheel coast to a stop before the next sweep. */
             struct timespec settle = {1, 0};
             nanosleep(&settle, NULL);
         }
     }
+    fclose(db);
 }
 
 /* ------------------------------------------------------------------ */
