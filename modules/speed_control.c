@@ -23,9 +23,11 @@
 #define NUM_MOTORS 2
 #define DT         0.001      /* loop period, seconds (1 ms) */
 
-/* ---- TODO: fill in from your Part 3 results, one entry per wheel -------- */
-static const double DEADBAND_POS[NUM_MOTORS] = { 0.00, 0.00 };  /* positive_deadband */
-static const double DEADBAND_NEG[NUM_MOTORS] = { 0.00, 0.00 };  /* negative_deadband (magnitude) */
+/* ---- Deadband from the Part 3 run (lab_04/deadband.csv, 10/21 13:03) ----
+ * Smallest duty that moved each wheel (0.02 steps). Wheel 1 starts moving
+ * at a lower duty in reverse (0.04) than forward (0.06). */
+static const double DEADBAND_POS[NUM_MOTORS] = { 0.06, 0.06 };  /* positive_deadband */
+static const double DEADBAND_NEG[NUM_MOTORS] = { 0.06, 0.04 };  /* negative_deadband (magnitude) */
 
 /* ---- Gains: duty per (edge/s). Starting point from the Lab 04 step response:
  * plant gain K ~ 6100 edges/s per duty, time constant tau ~ 0.04 s.
