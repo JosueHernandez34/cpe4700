@@ -1,7 +1,7 @@
 /*
  * main.c -- Lab 04: Motor step-response characterization (both wheels)
  *
- * Usage:  ./lab04 deadband | step | speed
+ * Usage:  ./lab04 deadband | step | speed [amplitude]
  *
  *   deadband : Part 3  -- ramp duty in 0.02 steps, one wheel at a time,
  *              reports each wheel's positive/negative deadband and
@@ -10,6 +10,9 @@
  *              log step_response.csv
  *   speed    : Part 7  -- triangular reference on both wheels at once,
  *              log speed_control.csv
+ *              Optional amplitude (edges/s, default 100 = the handout's
+ *              +/-100). Any other amplitude logs to
+ *              speed_control_<amplitude>.csv so the handout run is kept.
  *
  * Robot must be on a book with wheels off the ground. Ctrl-C stops safely.
  */
@@ -35,6 +38,9 @@
 
 #define TRI_CYCLES   3
 #define TRI_PERIOD_S 2.0          /* 1 s down, 1 s up */
+#define TRI_AMP_DEFAULT 100.0     /* handout target: +100 to -100 edges/s */
+#define TRI_AMP_MAX  3000.0       /* ~3000/6100 + 0.06 deadband = ~0.55 duty, stays
+                                   * under the 0.75 limit used in Lab 05 */
 
 static volatile sig_atomic_t running = 1;
 static void on_sigint(int sig) { (void)sig; running = 0; }
@@ -161,11 +167,21 @@ static void run_step(void)
 /* Part 7: triangular speed reference, 3 cycles, closed loop on both   */
 /* wheels (same target, independent controller state per wheel).       */
 /* ------------------------------------------------------------------ */
-static void run_speed(void)
+static void run_speed(double amp)
 {
     speed_control_init();
-    FILE *speed_log = fopen("speed_control.csv", "w");
-    if (!speed_log) { perror("speed_control.csv"); return; }
+
+    /* Handout amplitude keeps the original file name; any other amplitude
+     * gets its own file so the submitted run is never overwritten. */
+    char fname[64];
+    if (amp == TRI_AMP_DEFAULT)
+        snprintf(fname, sizeof fname, "speed_control.csv");
+    else
+        snprintf(fname, sizeof fname, "speed_control_%.0f.csv", amp);
+    printf("Triangle +/-%.0f edges/s, 3 cycles -> %s\n", amp, fname);
+
+    FILE *speed_log = fopen(fname, "w");
+    if (!speed_log) { perror(fname); return; }
     fprintf(speed_log, "time_ms,target_speed,measured_speed_0,measured_speed_1\n");
 
     const int total_ms = (int)(TRI_CYCLES * TRI_PERIOD_S * 1000.0);
@@ -179,10 +195,11 @@ static void run_speed(void)
         double cycle_time = (t_ms % (int)(TRI_PERIOD_S * 1000)) / 1000.0;
 
         double target_speed;
+        /* +amp down to -amp over 1 s, then back up over 1 s. */
         if (cycle_time < 1.0)
-            target_speed = 100.0 - 200.0 * cycle_time;
+            target_speed = amp - 2.0 * amp * cycle_time;
         else
-            target_speed = -100.0 + 200.0 * (cycle_time - 1.0);
+            target_speed = -amp + 2.0 * amp * (cycle_time - 1.0);
 
         double measured_speed[NUM_MOTORS];
         for (int m = 0; m < NUM_MOTORS; m++) {
@@ -202,8 +219,19 @@ static void run_speed(void)
 int main(int argc, char **argv)
 {
     if (argc < 2) {
-        fprintf(stderr, "usage: %s deadband|step|speed\n", argv[0]);
+        fprintf(stderr, "usage: %s deadband|step|speed [amplitude]\n", argv[0]);
         return 1;
+    }
+
+    /* Optional triangle amplitude for "speed"; checked before any motor
+     * is initialized so a bad value never spins the wheels. */
+    double amp = TRI_AMP_DEFAULT;
+    if (argc >= 3) {
+        amp = atof(argv[2]);
+        if (amp <= 0.0 || amp > TRI_AMP_MAX) {
+            fprintf(stderr, "amplitude must be > 0 and <= %.0f edges/s\n", TRI_AMP_MAX);
+            return 1;
+        }
     }
 
     signal(SIGINT, on_sigint);
@@ -215,7 +243,7 @@ int main(int argc, char **argv)
 
     if      (!strcmp(argv[1], "deadband")) run_deadband();
     else if (!strcmp(argv[1], "step"))     run_step();
-    else if (!strcmp(argv[1], "speed"))    run_speed();
+    else if (!strcmp(argv[1], "speed"))    run_speed(amp);
     else fprintf(stderr, "unknown mode '%s'\n", argv[1]);
 
     /* Part 8: cleanup */
