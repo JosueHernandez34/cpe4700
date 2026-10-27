@@ -1,0 +1,21 @@
+{
+  "usable": false,
+  "problems": [
+    "the robot sat against a block for 28% of the run (near a stop and hardly moving), so the data holds the block's behaviour, not free balancing",
+    "only 17 of 40 segments stayed inside the stop zone"
+  ],
+  "coefficients": {
+    "a1": 79.2699029398815,
+    "a2": 30.759510182887396,
+    "a3": 1.3137318039676678,
+    "a33": -36.02441157395621,
+    "b2": -9533.416910832784,
+    "b3": 261419.97435452716,
+    "c": 0.03646782130696697,
+    "Km": 7256.745160648796,
+    "tau": 0.02775895445084656
+  },
+  "structure": "physics",
+  "source_log": "balance_log_170442.csv",
+  "date": "2026-10-26"
+}

@@ -1,0 +1,21 @@
+{
+  "usable": false,
+  "problems": [
+    "the robot sat against a block for 51% of the run (near a stop and hardly moving), so the data holds the block's behaviour, not free balancing",
+    "motor gain 10071 counts/s per duty is far from Lab 04's 6100"
+  ],
+  "coefficients": {
+    "a1": 66.95997426689229,
+    "a2": 27.343054185033694,
+    "a3": 1.2669067348408496,
+    "a33": -25.819590344269383,
+    "b2": -12758.38765750226,
+    "b3": 260016.2535338268,
+    "c": 0.049067654364316336,
+    "Km": 10070.502671299624,
+    "tau": 0.03873028141292522
+  },
+  "structure": "physics",
+  "source_log": "balance_log_163831.csv",
+  "date": "2026-10-26"
+}

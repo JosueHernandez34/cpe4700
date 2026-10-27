@@ -11,6 +11,7 @@
 #define BNO055_OPR_MODE         0x3D
 #define BNO055_PWR_MODE         0x3E
 
+#define BNO055_GYRO_X_LSB       0x14   /* gyro X,Y,Z, 2 bytes each (added for Lab 05) */
 #define BNO055_EULER_H_LSB      0x1A
 #define BNO055_QUATERNION_W_LSB 0x20
 
@@ -40,6 +41,14 @@ int bno055_init(int fd);
 int bno055_read_euler(
     int fd,
     bno055_euler_t *euler);
+
+/* Angular rate in degrees per second about the sensor X, Y, Z axes (default unit
+ * setting is 16 LSB per deg/s). Returns 0 on success. Added for Lab 05. */
+int bno055_read_gyro(
+    int fd,
+    float *x,
+    float *y,
+    float *z);
 
 int bno055_read_quaternion(
     int fd,
