@@ -167,3 +167,26 @@ int bno055_read_calibration(
 
     return 0;
 }
+
+/* Gyro rates in deg/s (added for Lab 05). The BNO055 reports 16 LSB per deg/s
+ * in its default unit setting, so the raw 16-bit value is divided by 16. */
+int bno055_read_gyro(
+    int fd,
+    float *x,
+    float *y,
+    float *z)
+{
+    uint8_t d[6];
+
+    if (read_reg(fd,
+                 BNO055_GYRO_X_LSB,
+                 d,
+                 6))
+        return -1;
+
+    *x = s16(d[0], d[1]) / 16.0f;
+    *y = s16(d[2], d[3]) / 16.0f;
+    *z = s16(d[4], d[5]) / 16.0f;
+
+    return 0;
+}

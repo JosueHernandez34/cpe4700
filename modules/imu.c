@@ -4,10 +4,12 @@
  *          $ gcc -o imu_test1 imu_test1.c bno055.c
  */
 
+#include <math.h>
 #include <stdio.h>
 #include <unistd.h>
 
 #include "bno055.h"
+#include "imu.h"      /* Lab 05: for the new gyro prototypes and IMU_PITCH_RATE_* settings */
 
 static int fd;
 
@@ -72,4 +74,31 @@ double get_imu_heading()
 void imu_cleanup(void)
 {
     bno055_close(fd);
+}
+
+/* ---- Added for Lab 05 (new functions only) ---- */
+
+int get_imu_gyro(double *gx, double *gy, double *gz)
+{
+    float x, y, z;
+
+    if (bno055_read_gyro(fd, &x, &y, &z))
+        return -1;                      /* read failed: leave the outputs untouched */
+
+    *gx = x;
+    *gy = y;
+    *gz = z;
+    return 0;
+}
+
+double get_imu_pitch_rate(void)
+{
+    double g[3];
+
+    /* Axis and sign are measured by pitch_probe; until they are set, refuse to guess. */
+    if (IMU_PITCH_RATE_AXIS < 0 || IMU_PITCH_RATE_SIGN == 0)
+        return NAN;
+    if (get_imu_gyro(&g[0], &g[1], &g[2]))
+        return NAN;                     /* failed read, caller must handle it */
+    return IMU_PITCH_RATE_SIGN * g[IMU_PITCH_RATE_AXIS];
 }
