@@ -43,9 +43,12 @@ for csv in files:
     dt = np.diff(d.time_ms)
     print(f"{csv}: {len(d)} rows, {t.iloc[-1]:.2f} s, row spacing {dt.mean():.1f} ms "
           f"(min {dt.min()}, max {dt.max()}), {'stationary baseline' if stationary else 'moving run'}")
-    idle = (d.target_speed == 0) & (d.left_pwm == 0) & (d.right_pwm == 0)
+    # Idle = target and both PWMs at 0 for the last 0.5 s (25 rows), so the
+    # coast-down right after a release is not counted as encoder noise.
+    off = (d.target_speed == 0) & (d.left_pwm == 0) & (d.right_pwm == 0)
+    idle = off.astype(int).rolling(25, min_periods=25).min().fillna(0).astype(bool)
     if idle.any():
-        print(f"  measured speed while idle (target and PWM 0): mean {d.measured_speed[idle].mean():.1f}, "
+        print(f"  measured speed while idle (motors off >= 0.5 s): mean {d.measured_speed[idle].mean():.1f}, "
               f"std {d.measured_speed[idle].std():.1f} edges/s")
     if not (d.target_speed == 0).all():
         moving = d.target_speed != 0
