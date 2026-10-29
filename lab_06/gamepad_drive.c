@@ -7,8 +7,8 @@
 // Duty is capped at MAX_DUTY. Motors stop on Ctrl-C and whenever the
 // controller is unplugged (gamepad.c zeroes the axes then).
 //
-// Build (from modules/):
-//   gcc -Wall -Wextra -O2 -I. -o gamepad_drive gamepad_drive.c gamepad.c pwm.c -lgpiod -lpthread -lm
+// Build (from lab_06/):
+//   make gamepad_drive
 // Run (needs the same permissions as robotest for PWM and GPIO):
 //   ./gamepad_drive
 
