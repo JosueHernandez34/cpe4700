@@ -13,13 +13,13 @@ cd lab_06 && make lab06 gamepad_test
 grep -B2 -A8 "Pro Controller" /proc/bus/input/devices    # note the eventX in "Handlers="
 ./gamepad_test /dev/input/eventX
 ```
-Press each d-pad direction, then X, B and + (START). The table at the top of
-`main.c` expects:
+Press each d-pad direction, then X, B and + (START). Confirmed 10/28/26
+(USB, auto-detected, so the eventX argument can be left out):
 
-| Control | Expected |
+| Control | Code |
 |---|---|
-| D-pad | `ABS_HAT0X` / `ABS_HAT0Y` (-1/0/+1), or `BTN_DPAD_UP/DOWN/LEFT/RIGHT` |
-| X | `BTN_NORTH` |
+| D-pad | `ABS_HAT0X` (left -1, right +1) / `ABS_HAT0Y` (up -1, down +1) |
+| X | `BTN_WEST` |
 | B | `BTN_SOUTH` |
 | + | `BTN_START` |
 

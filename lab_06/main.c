@@ -18,17 +18,15 @@
  *
  *   Control        evdev code                     value
  *   D-pad up/down  ABS_HAT0Y (0x11)               -1 up, 0 released, +1 down
- *                  or BTN_DPAD_UP/DOWN (0x220/1)  1 pressed, 0 released
  *   D-pad l/r      ABS_HAT0X (0x10)               -1 left, 0 released, +1 right
- *                  or BTN_DPAD_LEFT/RIGHT (0x222/3)
- *   X  (top)       BTN_NORTH (0x133)              slow/fast toggle on press
- *   B  (bottom)    BTN_SOUTH (0x130)              stop on press
+ *   X              BTN_WEST  (0x134)              slow/fast toggle on press
+ *   B              BTN_SOUTH (0x130)              stop on press
  *   +  (START)     BTN_START (0x13b)              exit on press
  *
- * Depending on the kernel driver the d-pad arrives either as the hat axis or
- * as four buttons, so both are read. These are the codes expected for this
- * pad but NOT YET CONFIRMED on the robot: make gamepad_test, run it, press
- * each control, and correct this table and the BTN_* defines below if needed.
+ * Confirmed with gamepad_test on the Jetson (USB, auto-detected), 10/28/26.
+ * The d-pad arrives as the hat axis. BTN_DPAD_UP/DOWN/LEFT/RIGHT
+ * (0x220-0x223) are also read, so a driver that reports the d-pad as
+ * buttons still works.
  * ---------------------------------------------------------------------------
  *
  * Control, every 1 ms (same period as Lab 04):
@@ -76,7 +74,7 @@
 static const double TARGET_SPEED[2] = { 800.0, 2000.0 };   /* edges/s */
 static const double STEER_DUTY[2]   = { 0.08, 0.15 };      /* duty */
 
-#define BTN_MODE_TOGGLE BTN_NORTH   /* X */
+#define BTN_MODE_TOGGLE BTN_WEST    /* X */
 #define BTN_STOP        BTN_SOUTH   /* B */
 #define BTN_EXIT        BTN_START   /* + */
 
