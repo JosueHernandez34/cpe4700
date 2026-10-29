@@ -9,6 +9,9 @@
  *     duty    = clamp(u, -1, +1)
  *     pwm_set_duty(motor, duty)
  *
+ * speed_control_compute() does everything except the last line and returns
+ * duty, so Lab 06 can add steering before writing the PWM itself.
+ *
  * The motor does not move below the deadband duty you measured in
  * Part 3, so we add a small offset in the direction of u to "jump" it.
  */
@@ -47,14 +50,10 @@ int speed_control_init(void)
     return 0;
 }
 
-void speed_control(int motor, double target_speed)
+double speed_control_compute(int motor, double target_speed, double measured)
 {
     if (motor < 0 || motor >= NUM_MOTORS)
-        return;
-
-    /* enc_get_speed() is signed (A-edges/s, negative in reverse) and reads
-     * 0 when no edge has arrived for ~50 ms, so it can track +/- targets. */
-    double measured = enc_get_speed(motor);
+        return 0.0;
 
     double error = target_speed - measured;
 
@@ -75,7 +74,19 @@ void speed_control(int motor, double target_speed)
     if (u >  1.0) u =  1.0;
     if (u < -1.0) u = -1.0;
 
-    pwm_set_duty(motor, (float)u);
+    return u;
+}
+
+void speed_control(int motor, double target_speed)
+{
+    if (motor < 0 || motor >= NUM_MOTORS)
+        return;
+
+    /* enc_get_speed() is signed (A-edges/s, negative in reverse) and reads
+     * 0 when no edge has arrived for ~50 ms, so it can track +/- targets. */
+    double measured = enc_get_speed(motor);
+
+    pwm_set_duty(motor, (float)speed_control_compute(motor, target_speed, measured));
 }
 
 void speed_control_cleanup(void)

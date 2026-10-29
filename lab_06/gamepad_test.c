@@ -1,7 +1,7 @@
 // Prints live gamepad values so you can see which control is which.
 //
-// Build (from modules/):
-//   gcc -Wall -Wextra -O2 -I. -o gamepad_test gamepad_test.c gamepad.c -lpthread
+// Build (from lab_06/):
+//   make gamepad_test
 // Run:
 //   ./gamepad_test              (auto-detect the controller)
 //   ./gamepad_test /dev/input/event11
