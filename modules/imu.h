@@ -21,4 +21,10 @@ int get_imu_gyro(double *gx, double *gy, double *gz);
 #define IMU_PITCH_RATE_SIGN   0     /* NOT SET */
 double get_imu_pitch_rate(void);
 
+/* ---- Added for Lab 07 (new function only) ----
+ * Raw BNO055 Euler pitch in degrees, like get_imu_pitch(), but a failed read is reported
+ * instead of being turned into 0.0. Returns 0 on success; -1 on a failed read (the output
+ * is then left unchanged). Prints nothing, so it is safe to call every 1 ms. */
+int get_imu_pitch_checked(double *pitch);
+
 #endif

@@ -102,3 +102,15 @@ double get_imu_pitch_rate(void)
         return NAN;                     /* failed read, caller must handle it */
     return IMU_PITCH_RATE_SIGN * g[IMU_PITCH_RATE_AXIS];
 }
+
+/* ---- Added for Lab 07 (new function only) ---- */
+
+int get_imu_pitch_checked(double *pitch)
+{
+    bno055_euler_t e;
+
+    if (bno055_read_euler(fd, &e))
+        return -1;                      /* read failed: caller stops the motors */
+    *pitch = e.pitch;
+    return 0;
+}
