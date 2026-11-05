@@ -80,9 +80,9 @@ for csv in args.csv:
     print(f"\n{csv}: {len(d)} rows, {t.iloc[-1]:.2f} s, row spacing mean {dt.mean():.2f} ms "
           f"(min {dt.min()}, max {dt.max()})")
     if info:
-        print("  gains: Kp {kp}  Ki {ki}  Kd {kd}  Kv {kv}  theta0 {theta0_deg}  "
+        print("  gains: Kp {kp}  Ki {ki}  Kd {kd}  Kv {kv}  Kvi {kvi}  theta0 {theta0_deg}  "
               "maxduty {maxduty}".format(**{k: info.get(k, "?") for k in
-                                            ("kp", "ki", "kd", "kv", "theta0_deg", "maxduty")}))
+                                            ("kp", "ki", "kd", "kv", "kvi", "theta0_deg", "maxduty")}))
 
     # ---- summary numbers -------------------------------------------------
     bal = d[active]
@@ -108,6 +108,12 @@ for csv in args.csv:
                     print(f"  {name}: target max {m.target_speed.abs().max():.0f}, "
                           f"speed error mean {(m.target_speed - m.measured_speed).mean():+.0f} edges/s, "
                           f"pitch target range {m.pitch_target_deg.min():+.2f}..{m.pitch_target_deg.max():+.2f} deg")
+        if "speed_i_deg" in d and len(moving):
+            # Steady part of each press: the last 1 s before release.
+            held = moving.tail(min(len(moving), 50))
+            print(f"  speed loop (last 1 s of driving): speed error mean "
+                  f"{(held.target_speed - held.measured_speed).mean():+.0f} edges/s, "
+                  f"P lean {held.speed_p_deg.mean():+.2f} deg, I lean {held.speed_i_deg.mean():+.2f} deg")
         for sgn, name in ((1, "left"), (-1, "right")):
             s = bal[np.sign(bal.u_steer) == sgn]
             if len(s):
@@ -150,6 +156,9 @@ for csv in args.csv:
     ax[1].plot(t, d.pitch_target_deg, label="pitch target")
     if "theta0_deg" in info:
         ax[1].axhline(float(info["theta0_deg"]), color="gray", ls=":", label="theta0")
+    if "speed_i_deg" in d:
+        ax[1].plot(t, (float(info.get("theta0_deg", 0)) + d.speed_i_deg).where(active), lw=0.8,
+                   ls="--", label="theta0 + speed-loop I lean")
     ax[1].set_ylabel("angle (deg)")
     ax[1].set_title("2. Pitch angle and pitch-angle target")
     if len(bal):
@@ -191,7 +200,7 @@ for csv in args.csv:
         a.legend(loc="upper right", fontsize=8)
     gains = ""
     if info:
-        gains = f"  Kp {info.get('kp')}  Ki {info.get('ki')}  Kd {info.get('kd')}  Kv {info.get('kv')}"
+        gains = f"  Kp {info.get('kp')}  Ki {info.get('ki')}  Kd {info.get('kd')}  Kv {info.get('kv')}  Kvi {info.get('kvi')}"
     fig.suptitle(os.path.basename(csv) + gains + "   (green = balancing)")
     fig.tight_layout()
     out = csv[:-4] + ".png" if csv.endswith(".csv") else csv + ".png"

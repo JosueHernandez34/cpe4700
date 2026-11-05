@@ -19,7 +19,7 @@ and the log gets one row every 20 ms. Plots are made by `python3 plot_lab07.py`.
 | 4 | PID with explicit P, I, D terms | `p_term`, `i_term`, `d_term` in the loop (also logged) |
 | 5, 6 | Gamepad forward/reverse and steering | D-pad, section "Control mapping" |
 | 7 | Balanced while moving | the speed loop only moves the pitch target, limited to theta0 ± 3 deg |
-| 8 | Speed command → pitch target | theta_target = theta0 + Kv (v_target - v_meas) |
+| 8 | Speed command → pitch target | theta_target = theta0 + Kv ev + Kvi ∫ev dt, ev = v_target - v_meas |
 | 9 | CSV log | `lab07_YYYYMMDD_HHMMSS.csv`, gains in `_info.txt` |
 | 10 | Clean init and shutdown | gamepad and IMU before motors; on every exit motors 0, log closed, all modules cleaned up |
 
@@ -45,7 +45,8 @@ target from jumping, which would kick the derivative term.
 Each 1 ms iteration follows the order in handout section 9:
 
     v_meas       = d/dt [ (count0 + count1) / 2 ]           (50 ms difference)
-    theta_target = theta0 + clamp( Kv (v_target - v_meas), ±3 deg )
+    ev           = v_target - v_meas
+    theta_target = theta0 + clamp( Kv ev + Kvi ∫ev dt, ±3 deg )
     e            = theta_target - theta
     u            = DRIVE_SIGN ( Kp e + Ki ∫e dt + Kd de/dt ),  clamped to ±maxduty
     uL = u - u_steer,   uR = u + u_steer,                    each clamped to ±maxduty
@@ -77,9 +78,10 @@ One count on one wheel changes the average by 0.5, which is 10 edges/s. The 50 m
 gives an estimate with no single-edge spikes, unlike the edge-timing speed used in Lab 06.
 It lags by about 25 ms, which is slow next to the pitch loop and fast next to driving speed.
 
-The speed error becomes a lean:
+The speed error becomes a lean, through a PI speed loop:
 
-    theta_target = theta0 + Kv (v_target - v_meas),   limited to theta0 ± 3 deg
+    ev           = v_target - v_meas
+    theta_target = theta0 + Kv ev + Kvi ∫ev dt,   limited to theta0 ± 3 deg
 
 - **Robot too slow (or v_target > 0 from rest).** The target leans forward. The pitch loop
   drives the wheels to hold that lean, so the robot accelerates forward.
@@ -91,6 +93,22 @@ The speed error becomes a lean:
 With the default Kv = 0.003 deg per edge/s, a 600 edges/s error asks for a 1.8 deg lean. The
 ±3 deg limit keeps any speed command from asking for a lean close to the blocks (about
 ±7.4 deg from theta0).
+
+**Why the speed loop has an integral.** With P only, the speed settles where Kv ev equals
+the lean needed to keep moving against rolling friction, so it always runs a little below
+the command. A theta0 error does the same thing at standstill: the robot creeps. The pitch
+PID's own integral cannot fix either one, because it drives the pitch to the target, not
+the speed to the command. Kvi ∫ev slowly adds the missing lean until the speed error is 0.
+
+- Default Kvi = 0.0005 deg per edge: a 600 edges/s error held for 1 s adds 0.3 deg of lean.
+  That is an integral time Kv / Kvi = 6 s, slow next to the pitch loop, so it does not fight
+  the balance.
+- Anti-windup: the integral runs only while balancing and is reset on every arm and disarm.
+  |Kvi ∫ev| is clamped to 2 deg. The integral is frozen while the total target sits at its
+  ±3 deg limit and the error would push it further, so a long press cannot wind it up.
+  (Checked in the PC test: with a large Kvi the target stopped at exactly θ0 − 3 deg and the
+  integral held at about −1.2 deg instead of running to the 2 deg clamp.)
+- `--kvi 0` turns it off, which gives the handout's suggested P-only form.
 
 ## Safety
 
@@ -109,26 +127,28 @@ the worst one. **TODO: worst late tick in the data runs: ____ µs.**
 ## Logging
 
 Header:
-`time_ms,target_speed,measured_speed,pitch_deg,pitch_target_deg,error_deg,pid_output,left_pwm,right_pwm,u_steer,p_term,i_term,d_term,state`
+`time_ms,target_speed,measured_speed,pitch_deg,pitch_target_deg,error_deg,pid_output,left_pwm,right_pwm,u_steer,p_term,i_term,d_term,state,speed_p_deg,speed_i_deg`
 
 The first nine columns are the handout's. The rest are the steering offset, the three PID
 terms (each with DRIVE_SIGN applied, so p + i + d = pid_output before the clamp), and the state
-(0 disarmed, 1 armed waiting, 2 balancing). `next_log_ms` starts at the elapsed time + 20 and
+(0 disarmed, 1 armed waiting, 2 balancing), and the speed loop's P and I lean in deg
+(before the ±3 deg clamp). `next_log_ms` starts at the elapsed time + 20 and
 advances by 20 after each row, as in the handout. If the loop ever stalls past a whole slot,
 that slot is skipped instead of writing duplicate rows. The gains and limits for each run go
 in `lab07_..._info.txt`, which `plot_lab07.py` reads.
 
 ## Controller tuning — TODO
 
-Procedure 10.3: P only, then PD, then PID, first with `--kv 0`.
+Procedure 10.3: P only, then PD, then PID, first with `--kv 0 --kvi 0`.
 
-| Step | Kp | Ki | Kd | Kv | Result |
-|---|---|---|---|---|---|
-| P only | | 0 | 0 | 0 | |
-| PD | | 0 | | 0 | |
-| PID | | | | 0 | |
-| + speed loop | | | | | |
-| **Final** | | | | | |
+| Step | Kp | Ki | Kd | Kv | Kvi | Result |
+|---|---|---|---|---|---|---|
+| P only | | 0 | 0 | 0 | 0 | |
+| PD | | 0 | | 0 | 0 | |
+| PID | | | | 0 | 0 | |
+| + speed loop P | | | | | 0 | |
+| + speed loop I | | | | | | |
+| **Final** | | | | | | |
 
 Start values are Lab 05 setting C (Kp 0.015, Ki 0.005, Kd 0.005), the only one that gave
 long holds (21.9 s) there.

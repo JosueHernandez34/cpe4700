@@ -8,6 +8,7 @@
  *                  first device that looks like a gamepad (Lab 06).
  *   --kp X --ki X --kd X   PID gains (defaults: Lab 05 setting C)
  *   --kv X         speed-to-angle gain, deg per (edge/s)
+ *   --kvi X        speed-error integral gain, deg per edge (0 turns it off)
  *   --theta0 X     balance angle theta0, deg (default: the Lab 05 pitch zero)
  *   --vmax X       largest speed command, edges/s
  *   --steer X      steering duty u_steer at full d-pad
@@ -41,8 +42,11 @@
  *   1. read the gamepad              (gamepad.c thread, never blocks)
  *   2. v_target: ramp toward +/-vmax while the d-pad is held, toward 0 when not
  *   3. v_meas  = average of both wheel counts, differenced over 50 ms
- *   4. theta_target = theta0 + Kv*(v_target - v_meas),
+ *   4. ev = v_target - v_meas
+ *      theta_target = theta0 + Kv*ev + Kvi*integral(ev),
  *                     clamped to theta0 +/- TARGET_LIMIT_DEG
+ *      (the integral removes the steady speed error a P-only speed loop
+ *      leaves when a small lean is needed against rolling friction)
  *   5. theta   = wrap(180 - raw BNO055 pitch)   (Lab 05: 0 = sensor level,
  *                                                forward lean positive)
  *   6. e       = theta_target - theta
@@ -141,6 +145,9 @@
 #define V_RAMP           600.0      /* edges/s per s while the d-pad is held */
 #define V_RELEASE        1200.0     /* edges/s per s back toward 0 on release */
 #define KV_DEFAULT       0.003      /* deg per (edge/s): 600 edges/s error = 1.8 deg */
+#define KVI_DEFAULT      0.0005     /* deg per edge: a 600 edges/s error held 1 s adds
+                                     * 0.3 deg of lean (integral time Kv/Kvi = 6 s) */
+#define VI_LIMIT_DEG     2.0        /* anti-windup: |Kvi*integral| never above this */
 #define TARGET_LIMIT_DEG 3.0        /* theta_target stays within theta0 +/- this */
 
 /* ---------------- Steering and output ---------------- */
@@ -153,7 +160,7 @@
 #define BTN_EXIT         BTN_START  /* + */
 
 typedef struct {
-    double kp, ki, kd, kv, theta0, vmax, steer, maxduty, deadband;
+    double kp, ki, kd, kv, kvi, theta0, vmax, steer, maxduty, deadband;
 } params_t;
 
 typedef enum { ST_DISARMED = 0, ST_WAITING = 1, ST_ACTIVE = 2 } state_t;
@@ -316,6 +323,7 @@ static int parse_args(int argc, char **argv, params_t *p, const char **dev, int 
 {
     struct { const char *name; double *val; } opt[] = {
         { "--kp", &p->kp }, { "--ki", &p->ki }, { "--kd", &p->kd }, { "--kv", &p->kv },
+        { "--kvi", &p->kvi },
         { "--theta0", &p->theta0 }, { "--vmax", &p->vmax }, { "--steer", &p->steer },
         { "--maxduty", &p->maxduty }, { "--deadband", &p->deadband },
     };
@@ -354,6 +362,10 @@ static int parse_args(int argc, char **argv, params_t *p, const char **dev, int 
         fprintf(stderr, "--maxduty must be in (0, 1], the PWM module's range\n");
         return -1;
     }
+    if (p->kvi < 0.0) {
+        fprintf(stderr, "--kvi must be >= 0\n");
+        return -1;
+    }
     if (p->vmax < 0.0 || p->steer < 0.0 || p->deadband < 0.0 || p->deadband > 0.2) {
         fprintf(stderr, "--vmax and --steer must be >= 0, --deadband 0..0.2\n");
         return -1;
@@ -368,12 +380,12 @@ static void write_info(const char *path, const char *csv, const params_t *p)
         perror(path);
         return;
     }
-    fprintf(f, "log=%s\nkp=%.6f\nki=%.6f\nkd=%.6f\nkv=%.6f\ntheta0_deg=%.3f\n"
+    fprintf(f, "log=%s\nkp=%.6f\nki=%.6f\nkd=%.6f\nkv=%.6f\nkvi=%.6f\nvi_limit_deg=%.1f\ntheta0_deg=%.3f\n"
                "vmax=%.1f\nsteer=%.3f\nmaxduty=%.3f\ndeadband=%.3f\n"
                "drive_sign=%.0f\ntarget_limit_deg=%.1f\ncutoff_deg=%.1f\n"
                "rest_deg=%.1f\nrest_ms=%d\ni_limit_duty=%.2f\nspeed_window_ms=%d\n"
                "v_ramp=%.0f\nv_release=%.0f\nloop_ms=1\nlog_ms=%d\n",
-            csv, p->kp, p->ki, p->kd, p->kv, p->theta0, p->vmax, p->steer, p->maxduty,
+            csv, p->kp, p->ki, p->kd, p->kv, p->kvi, VI_LIMIT_DEG, p->theta0, p->vmax, p->steer, p->maxduty,
             p->deadband, DRIVE_SIGN, TARGET_LIMIT_DEG, CUTOFF_DEG, REST_DEG, REST_MS,
             I_LIMIT_DUTY, SPEED_WINDOW_MS, V_RAMP, V_RELEASE, LOG_MS);
     fclose(f);
@@ -384,13 +396,13 @@ static void write_info(const char *path, const char *csv, const params_t *p)
  * ====================================================================== */
 int main(int argc, char **argv)
 {
-    params_t p = { KP_DEFAULT, KI_DEFAULT, KD_DEFAULT, KV_DEFAULT, THETA0_DEFAULT_DEG,
+    params_t p = { KP_DEFAULT, KI_DEFAULT, KD_DEFAULT, KV_DEFAULT, KVI_DEFAULT, THETA0_DEFAULT_DEG,
                    VMAX_DEFAULT, STEER_DEFAULT, MAXDUTY_DEFAULT, 0.0 };
     const char *dev = NULL;
     int monitor = 0;
 
     if (parse_args(argc, argv, &p, &dev, &monitor) != 0) {
-        fprintf(stderr, "usage: %s [--monitor] [--kp X] [--ki X] [--kd X] [--kv X] "
+        fprintf(stderr, "usage: %s [--monitor] [--kp X] [--ki X] [--kd X] [--kv X] [--kvi X] "
                         "[--theta0 X] [--vmax X] [--steer X] [--maxduty X] [--deadband X] "
                         "[event_device]\n", argv[0]);
         return 2;
@@ -440,7 +452,7 @@ int main(int argc, char **argv)
         return 1;
     }
     fprintf(log, "time_ms,target_speed,measured_speed,pitch_deg,pitch_target_deg,error_deg,"
-                 "pid_output,left_pwm,right_pwm,u_steer,p_term,i_term,d_term,state\n");
+                 "pid_output,left_pwm,right_pwm,u_steer,p_term,i_term,d_term,state,speed_p_deg,speed_i_deg\n");
     write_info(iname, fname, &p);
 
     if (pwm_init() != 0 || enc_init() != 0) {
@@ -453,15 +465,16 @@ int main(int argc, char **argv)
     }
 
     printf("Logging to %s (settings in %s)\n"
-           "Kp %.4f  Ki %.4f  Kd %.4f  Kv %.4f deg/(edge/s)  theta0 %.3f deg  "
+           "Kp %.4f  Ki %.4f  Kd %.4f  Kv %.4f deg/(edge/s)  Kvi %.5f deg/edge  theta0 %.3f deg  "
            "vmax %.0f  steer %.3f  maxduty %.2f\n"
            "X arm, B disarm, D-pad drive/steer, START exit.  Pitch now %+.2f deg.\n",
-           fname, iname, p.kp, p.ki, p.kd, p.kv, p.theta0, p.vmax, p.steer, p.maxduty, theta);
+           fname, iname, p.kp, p.ki, p.kd, p.kv, p.kvi, p.theta0, p.vmax, p.steer, p.maxduty, theta);
 
     /* ---- Controller state ---- */
     state_t state = ST_DISARMED;
     double v_target = 0.0, u_steer = 0.0;
-    double integral = 0.0;                     /* deg*s */
+    double integral = 0.0;                     /* deg*s: pitch-error integral (PID) */
+    double v_integral = 0.0;                   /* edges: speed-error integral (speed loop) */
     double e_win = 0.0, d_filt = 0.0;          /* derivative window start, filtered de/dt */
     int win_steps = 0, rest_ms = 0, prev_arm = 0, prev_disarm = 0;
 
@@ -523,9 +536,22 @@ int main(int argc, char **argv)
         i_cnt = (i_cnt + 1) % n_cnt;
         double v_meas = (c_now - c_old) / (SPEED_WINDOW_MS * DT_S);   /* edges/s */
 
-        /* 4. Pitch target from the speed error, limited to a small lean. */
-        double theta_target = p.theta0
-            + clamp(p.kv * (v_target - v_meas), TARGET_LIMIT_DEG);
+        /* 4. Pitch target from the speed error (PI), limited to a small lean.
+         * The integral only runs while balancing, is clamped to VI_LIMIT_DEG of
+         * lean, and is frozen while the target sits at its limit and the error
+         * would push it further (so it cannot wind up during a long press). */
+        double ev = v_target - v_meas;                        /* edges/s */
+        double speed_p = p.kv * ev;                           /* deg */
+        if (state == ST_ACTIVE && p.kvi > 0.0) {
+            double lean_cmd = speed_p + p.kvi * v_integral;
+            int saturated = fabs(lean_cmd) >= TARGET_LIMIT_DEG && ev * lean_cmd > 0.0;
+            if (!saturated)
+                v_integral = clamp(v_integral + ev * DT_S, VI_LIMIT_DEG / p.kvi);
+        } else {
+            v_integral = 0.0;
+        }
+        double speed_i = p.kvi * v_integral;                  /* deg */
+        double theta_target = p.theta0 + clamp(speed_p + speed_i, TARGET_LIMIT_DEG);
 
         /* 5. IMU. A failed read stops the motors at once. */
         if (read_pitch(&theta) != 0) {
@@ -538,6 +564,7 @@ int main(int argc, char **argv)
         if (state == ST_WAITING && fabs(lean) < ARM_WINDOW_DEG) {
             state = ST_ACTIVE;
             integral = 0.0;
+            v_integral = 0.0;
             rest_ms = 0;
             printf("Balancing (pitch %+.2f deg)\n", theta);
         } else if (state == ST_ACTIVE) {
@@ -604,9 +631,9 @@ int main(int argc, char **argv)
         /* 11. One row every 20 ms, from this iteration's values. */
         long t_ms = elapsed_ms(&start);
         if (t_ms >= next_log_ms) {
-            fprintf(log, "%ld,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.4f,%.4f,%.4f,%.4f,%d\n",
+            fprintf(log, "%ld,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.4f,%.4f,%.4f,%.4f,%d,%.4f,%.4f\n",
                     t_ms, v_target, v_meas, theta, theta_target, e, u,
-                    left_pwm, right_pwm, u_steer, p_term, i_term, d_term, (int)state);
+                    left_pwm, right_pwm, u_steer, p_term, i_term, d_term, (int)state, speed_p, speed_i);
             next_log_ms += LOG_MS;
             while (next_log_ms <= t_ms)        /* skip a slot rather than duplicate it */
                 next_log_ms += LOG_MS;
