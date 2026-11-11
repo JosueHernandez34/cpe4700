@@ -8,7 +8,7 @@
  *
  * Pitch zero: the midpoint of the IMU readings at the two block stops (Lab 05 rule). Run
  *   sudo ./lab07 --cal    to measure it: hold the robot on the forward stop and press X, then
- *                         hold it on the back stop and press B. The zero is saved in pitch_zero.txt
+ *                         hold it on the back stop and press B. The zero is saved in pitch_zero.txt next to the lab07 program
  *                         and used by every later run. Without a file, balance_ctrl.h defaults are used.
  *
  *   sudo ./lab07 --cal-balance   with NO stopper: hold the robot balanced (or let it balance), press X; it
@@ -28,6 +28,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <unistd.h>
 #include <linux/input.h>
 
 #include "balance_ctrl.h"
@@ -52,7 +53,7 @@
 #define BTN_EXIT       BTN_START
 #define BTN_CAL_FWD    BTN_WEST   /* X: record the forward stop (calibration only) */
 #define BTN_CAL_BACK   BTN_SOUTH  /* B: record the back stop (calibration only) */
-#define ZERO_FILE      "pitch_zero.txt"
+#define ZERO_NAME      "pitch_zero.txt"   /* stored next to the lab07 program, wherever it is run from */
 #define CAL_SAMPLES    100        /* 1 s of 10 ms samples */
 #define CAL_MAX_SPREAD 1.0        /* deg: robot must be held still or the average means nothing */
 
@@ -79,6 +80,20 @@ static double wrap180(double a)
     while (a > 180.0) a -= 360.0;
     while (a <= -180.0) a += 360.0;
     return a;
+}
+
+static char zero_path[512] = ZERO_NAME;
+
+static void find_zero_path(void)
+{
+    char exe[400];
+    ssize_t n = readlink("/proc/self/exe", exe, sizeof exe - 1);
+    if (n <= 0) return;
+    exe[n] = '\0';
+    char *slash = strrchr(exe, '/');
+    if (!slash) return;
+    *slash = '\0';
+    snprintf(zero_path, sizeof zero_path, "%s/%s", exe, ZERO_NAME);
 }
 
 static double raw_pitch(void)
@@ -129,9 +144,9 @@ static double calibrate_zero(void)
     double zero = 0.5 * (f + b);
     printf("Zero = midpoint %+.3f deg. Stops are at %+.3f (forward) and %+.3f (back) from the zero.\n",
            zero, f - zero, b - zero);
-    FILE *z = fopen(ZERO_FILE, "w");
-    if (z) { fprintf(z, "%.4f %.4f %.4f\n", zero, f, b); fclose(z); printf("Saved to %s\n", ZERO_FILE); }
-    else perror(ZERO_FILE);
+    FILE *z = fopen(zero_path, "w");
+    if (z) { fprintf(z, "%.4f %.4f %.4f\n", zero, f, b); fclose(z); printf("Saved to %s\n", zero_path); }
+    else perror(zero_path);
     return zero;
 }
 
@@ -156,9 +171,9 @@ static double calibrate_balance(void)
 
 static void save_zero_only(double zero)
 {
-    FILE *z = fopen(ZERO_FILE, "w");
-    if (z) { fprintf(z, "%.4f nan nan\n", zero); fclose(z); printf("Saved zero %+.3f deg to %s (no stops)\n", zero, ZERO_FILE); }
-    else perror(ZERO_FILE);
+    FILE *z = fopen(zero_path, "w");
+    if (z) { fprintf(z, "%.4f nan nan\n", zero); fclose(z); printf("Saved zero %+.3f deg to %s (no stops)\n", zero, zero_path); }
+    else perror(zero_path);
 }
 
 static double load_zero(double stops[2])
@@ -166,15 +181,15 @@ static double load_zero(double stops[2])
     double zero, f, b;
     stops[0] = STOP_FWD_RAW_DEG  - PITCH_ZERO_DEFAULT_DEG;
     stops[1] = STOP_BACK_RAW_DEG - PITCH_ZERO_DEFAULT_DEG;
-    FILE *z = fopen(ZERO_FILE, "r");
+    FILE *z = fopen(zero_path, "r");
     if (z && fscanf(z, "%lf %lf %lf", &zero, &f, &b) == 3 && isfinite(zero)) {
         fclose(z);
         stops[0] = f - zero;      /* NAN when the file has no stops */
         stops[1] = b - zero;
         if (isfinite(f) && isfinite(b))
-            printf("Pitch zero %+.3f deg, stops %+.2f / %+.2f (from %s)\n", zero, stops[0], stops[1], ZERO_FILE);
+            printf("Pitch zero %+.3f deg, stops %+.2f / %+.2f (from %s)\n", zero, stops[0], stops[1], zero_path);
         else
-            printf("Pitch zero %+.3f deg, no stops saved: block-rest trip off (from %s)\n", zero, ZERO_FILE);
+            printf("Pitch zero %+.3f deg, no stops saved: block-rest trip off (from %s)\n", zero, zero_path);
         return zero;
     }
     if (z) fclose(z);
@@ -218,6 +233,7 @@ int main(int argc, char **argv)
         else dev = argv[i];
     }
     const char *err = NULL;
+    find_zero_path();
 
     signal(SIGINT, on_signal);
     signal(SIGTERM, on_signal);
