@@ -5,11 +5,14 @@ CC      = gcc
 CFLAGS  = -Wall -Wextra -O2 -I$(MOD_DIR) -I.
 LDLIBS  = -lgpiod -lpthread -lm
 
-SRCS = main.c balance_ctrl.c $(MOD_DIR)/pwm.c $(MOD_DIR)/encoder.c $(MOD_DIR)/imu.c \
+GTK4_CFLAGS = $(shell pkg-config --cflags gtk4)
+GTK4_LIBS   = $(shell pkg-config --libs gtk4)
+
+SRCS = main.c balance_ctrl.c tune_gui.c $(MOD_DIR)/pwm.c $(MOD_DIR)/encoder.c $(MOD_DIR)/imu.c \
        $(MOD_DIR)/bno055.c $(MOD_DIR)/gamepad.c
 
-lab07: $(SRCS) balance_ctrl.h
-	$(CC) $(CFLAGS) -o $@ $(SRCS) $(LDLIBS)
+lab07: $(SRCS) balance_ctrl.h tune_shared.h
+	$(CC) $(CFLAGS) $(GTK4_CFLAGS) -o $@ $(SRCS) $(LDLIBS) $(GTK4_LIBS)
 
 # Gamepad mapping check. No motors, no IMU. Run: sudo ./joystick_test   (or: sudo ./joystick_test live)
 joystick_test: joystick_test.c balance_ctrl.c balance_ctrl.h $(MOD_DIR)/gamepad.c

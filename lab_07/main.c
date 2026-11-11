@@ -13,6 +13,11 @@
  * Steering strength grows with speed (full at STEER_FULL_SPEED), so it veers while moving and never
  * pivots on the spot.
  *
+ * Tuning window: sudo -E ./lab07 --gui   (on the Jetson's own screen) opens a window with sliders for the
+ * balance angle, Kp, Ki, Kd and Kv that change them while the robot runs. A trip does not end the run in
+ * this mode: press Re-arm in the window, then hold the robot near the angle again. Every change is
+ * written to lab07_<time>_gui_changes.csv next to the run log.
+ *
  * Gains: defaults are Kp/Ki/Kd in robot_params.h. For tuning, override them without rebuilding:
  *   sudo ./lab07 --kp 0.015 --ki 0 --kd 0       P only
  *   sudo ./lab07 --kp 0.015 --ki 0 --kd 0.005   P + D
@@ -51,6 +56,8 @@
 #include "gamepad.h"
 #include "imu.h"
 #include "pwm.h"
+#include "tune_shared.h"
+#include <pthread.h>
 
 #define LOOP_NS        ((long)(ROBOT_LOOP_PERIOD_S * 1e9 + 0.5))
 #define LOG_MS         ROBOT_LOG_PERIOD_MS
@@ -228,17 +235,150 @@ static void shutdown_hw(void)
     gp_cleanup();
 }
 
+typedef struct {
+    FILE *log, *changes;      /* run log, and the record of every gain / angle change */
+    double pitch_zero;
+    int drive;
+    ctrl_t c;
+    tune_t *tune;             /* NULL = console only: a trip ends the run */
+    const char *err;
+} run_t;
+
+/* The control loop. Returns when the run ends; r->err says why (NULL = normal exit). */
+static void control_loop(run_t *r)
+{
+    ctrl_t *c = &r->c;
+    tune_t *tn = r->tune;
+    const char *err = NULL;
+    int prev_b = 0, was_live = 0, stopped = 0;
+    double pitch = raw_pitch() - r->pitch_zero;
+    double pitch_at_window = pitch, rate = 0.0;
+    int window_count = 0;
+    long next_status_ms = 0;
+    double last_set[5] = { c->theta0, c->kp, c->ki, c->kd, c->kv };
+
+    struct timespec start, next;
+    clock_gettime(CLOCK_MONOTONIC, &start);
+    next = start;
+    long next_log_ms = elapsed_ms(&start) + LOG_MS;
+
+    while (running) {
+        /* 0. Settings from the tuning window, if there is one. */
+        if (tn) {
+            if (atomic_load(&tn->quit)) break;
+            if (atomic_exchange(&tn->rearm_req, 0)) { ctrl_rearm(c); printf("Re-armed\n"); }
+            c->theta0 = atomic_load(&tn->theta0);
+            c->kp = atomic_load(&tn->kp);
+            c->ki = atomic_load(&tn->ki);
+            c->kd = atomic_load(&tn->kd);
+            c->kv = atomic_load(&tn->kv);
+            double now[5] = { c->theta0, c->kp, c->ki, c->kd, c->kv };
+            int changed = 0;
+            for (int i = 0; i < 5; i++) if (now[i] != last_set[i]) changed = 1;
+            if (changed) {
+                fprintf(r->changes, "%ld,%.4f,%.5f,%.5f,%.5f,%.5f\n", elapsed_ms(&start), now[0], now[1], now[2], now[3], now[4]);
+                for (int i = 0; i < 5; i++) last_set[i] = now[i];
+            }
+        }
+
+        /* 1. Gamepad. */
+        if (!gp_is_connected()) { err = "controller disconnected"; break; }
+        if (gp_get_button(BTN_EXIT)) break;
+
+        double ly = r->drive ? gp_get_axis(GP_AXIS_LY) : 0.0;   /* sticks ignored unless --drive */
+        double rx = r->drive ? gp_get_axis(GP_AXIS_RX) : 0.0;
+        int b = gp_get_button(BTN_ZERO_SPEED);
+        if (b && !prev_b) { stopped = 1; ctrl_zero_speed(c); printf("STOP (centre both sticks to resume)\n"); }
+        prev_b = b;
+        if (stopped && ly == 0.0 && rx == 0.0 && !b) { stopped = 0; printf("Resumed\n"); }
+        ctrl_set_speed(c, stopped ? 0.0 : ctrl_stick_speed(ly), LOOP_MS_DT);
+        double steer = stopped ? 0.0 : ctrl_stick_steer(rx);   /* strength scales with speed inside ctrl_update */
+
+        /* 2. Measurements. get_imu_pitch() returns 0.0 on a failed read, which becomes a pitch of about
+         * 175 deg here, so a failed read trips the cutoff and cuts the motors. (A pitch that repeats
+         * exactly is normal at rest: the IMU resolution is 1/16 deg.) */
+        double raw = get_imu_pitch();
+        pitch = wrap180(PITCH_ZERO_DEG - raw) - r->pitch_zero;   /* deg from the calibrated zero */
+        if (++window_count >= RATE_WINDOW_STEPS) {
+            double rt = (pitch - pitch_at_window) / (RATE_WINDOW_STEPS * LOOP_MS_DT);
+            rate += RATE_FILTER * (rt - rate);
+            pitch_at_window = pitch;
+            window_count = 0;
+        }
+        double speed = enc_get_speed(FEEDBACK_ENC);
+
+        /* 3. Controller, then write exactly what is logged. */
+        ctrl_in_t in = { pitch, rate, speed, steer };
+        ctrl_out_t out;
+        int live = ctrl_update(c, &in, &out);
+        if (live && !was_live) printf("Motors LIVE\n");
+        was_live = live;
+        if (c->tripped && !tn) {
+            err = c->block_rest_ms >= BLOCK_REST_MS ? "resting on a block stop" : "cutoff exceeded";
+            motors_off();
+        }
+        float l = (float)out.left, rr = (float)out.right;
+        if (pwm_set_duty(LEFT_CH, l) < 0 || pwm_set_duty(RIGHT_CH, rr) < 0) {
+            err = "pwm_set_duty failed";
+            break;
+        }
+        if (tn) {
+            atomic_store(&tn->pitch, pitch);
+            atomic_store(&tn->pitch_target, out.pitch_target);
+            atomic_store(&tn->speed, speed);
+            atomic_store(&tn->speed_cmd, c->speed_cmd);
+            atomic_store(&tn->left, (double)l);
+            atomic_store(&tn->right, (double)rr);
+            atomic_store(&tn->trip_reason, c->block_rest_ms >= BLOCK_REST_MS ? 2 : 1);
+            atomic_store(&tn->state, c->tripped ? 3 : (live ? 2 : (c->armed ? 1 : 0)));
+        }
+
+        /* 4. One row every 20 ms. */
+        long t_ms = elapsed_ms(&start);
+        if (t_ms >= next_status_ms) {
+            printf("t %4.0f s  pitch %+6.2f deg (target %+.1f)  speed %+7.0f edges/s  %s\n", t_ms / 1000.0, pitch,
+                   out.pitch_target, speed,
+                   c->tripped ? "TRIPPED" : (live ? "LIVE" : (c->armed ? "armed" : "waiting: hold the robot near the target")));
+            next_status_ms += 1000;
+        }
+        if (t_ms >= next_log_ms) {
+            fprintf(r->log, "%ld,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f\n", t_ms, c->speed_cmd,
+                    speed, pitch, out.pitch_target, out.error, out.pid_output, (double)l, (double)rr);
+            next_log_ms += LOG_MS;
+            while (next_log_ms <= t_ms) next_log_ms += LOG_MS;
+        }
+        if (err) break;
+
+        tick(&next);
+    }
+    motors_off();
+    r->err = err;
+    if (tn) {
+        tn->err = err;
+        atomic_store(&tn->done, 1);
+    }
+}
+
+static void *control_thread(void *arg)
+{
+    control_loop(arg);
+    return NULL;
+}
+
 int main(int argc, char **argv)
 {
     const char *dev = NULL;
     int cal = 0, cal_bal = 0, have_zero = 0;
     double kp = KP, ki = KI, kd = KD, kv = KV;
-    int drive = 0;
+    int drive = 0, gui = 0;
+    double theta0 = THETA0_DEG;
     double typed_zero = 0.0;
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--cal") == 0) cal = 1;
         else if (strcmp(argv[i], "--cal-balance") == 0) cal_bal = 1;
         else if (strcmp(argv[i], "--drive") == 0) drive = 1;
+        else if (strcmp(argv[i], "--gui") == 0) gui = 1;
+        else if (strcmp(argv[i], "--theta0") == 0 && i + 1 < argc) theta0 = atof(argv[++i]);
         else if (strcmp(argv[i], "--kv") == 0 && i + 1 < argc) kv = atof(argv[++i]);
         else if (strcmp(argv[i], "--kp") == 0 && i + 1 < argc) kp = atof(argv[++i]);
         else if (strcmp(argv[i], "--ki") == 0 && i + 1 < argc) ki = atof(argv[++i]);
@@ -246,7 +386,6 @@ int main(int argc, char **argv)
         else if (strcmp(argv[i], "--zero") == 0 && i + 1 < argc) { typed_zero = atof(argv[++i]); have_zero = 1; }
         else dev = argv[i];
     }
-    const char *err = NULL;
     find_zero_path();
 
     signal(SIGINT, on_signal);
@@ -292,99 +431,76 @@ int main(int argc, char **argv)
         pitch_zero = load_zero(stops);
     }
 
-    char fname[128];
+    if (gui && !tune_gui_available()) {
+        fprintf(stderr, "no display for the tuning window. Run it on the Jetson's own screen, with: sudo -E ./lab07 --gui\n");
+        shutdown_hw();
+        return 1;
+    }
+
+    char fname[160], cname[180];
     time_t wall = time(NULL);
     char stamp[32];
     strftime(stamp, sizeof stamp, "%Y%m%d_%H%M%S", localtime(&wall));
-    snprintf(fname, sizeof fname, "lab07_%s_kp%g_ki%g_kd%g%s.csv", stamp, kp, ki, kd, drive ? "_drive" : "");
+    snprintf(fname, sizeof fname, "lab07_%s_kp%g_ki%g_kd%g%s%s.csv", stamp, kp, ki, kd, drive ? "_drive" : "", gui ? "_gui" : "");
+    snprintf(cname, sizeof cname, "lab07_%s%s_changes.csv", stamp, gui ? "_gui" : "");
     FILE *log = fopen(fname, "w");
     if (!log) { perror(fname); shutdown_hw(); return 1; }
     fprintf(log, "time_ms,target_speed,measured_speed,pitch_deg,pitch_target_deg,error_deg,pid_output,left_pwm,right_pwm\n");
+    FILE *changes = gui ? fopen(cname, "w") : NULL;
+    if (gui) {
+        if (!changes) { perror(cname); fclose(log); shutdown_hw(); return 1; }
+        fprintf(changes, "time_ms,theta0_deg,kp,ki,kd,kv\n");
+        fprintf(changes, "0,%.4f,%.5f,%.5f,%.5f,%.5f\n", theta0, kp, ki, kd, kv);
+    }
 
     printf("Logging to %s\nHold the robot near %.1f deg; motors go live after %d ms inside +/-%.1f deg.\n"
            "Left stick speed, right stick steer, B stop, START exit.\n",
-           fname, THETA0_DEG, ARM_HOLD_MS, ARM_BAND_DEG);
+           fname, theta0, ARM_HOLD_MS, ARM_BAND_DEG);
 
-    ctrl_t c;
-    ctrl_init(&c);
-    ctrl_set_stops(&c, stops[0], stops[1]);
-    c.kp = kp; c.ki = ki; c.kd = kd; c.kv = kv;
-    printf("Gains: Kp %g, Ki %g, Kd %g, Kv %g. %s\n", kp, ki, kd, kv,
+    static run_t run;
+    run.log = log; run.changes = changes; run.pitch_zero = pitch_zero; run.drive = drive;
+    ctrl_init(&run.c);
+    ctrl_set_stops(&run.c, stops[0], stops[1]);
+    run.c.kp = kp; run.c.ki = ki; run.c.kd = kd; run.c.kv = kv; run.c.theta0 = theta0;
+    printf("Angle %g deg, Kp %g, Ki %g, Kd %g, Kv %g. %s\n", theta0, kp, ki, kd, kv,
            drive ? "Sticks ON." : "Balance in place only: sticks are ignored (add --drive to use them).");
-    int prev_b = 0, was_live = 0, stopped = 0;
 
-    double pitch = raw_pitch() - pitch_zero;
-    double pitch_at_window = pitch, rate = 0.0;
-    int window_count = 0;
-    long next_status_ms = 0;
-
-    struct timespec start, next;
-    clock_gettime(CLOCK_MONOTONIC, &start);
-    next = start;
-    long next_log_ms = elapsed_ms(&start) + LOG_MS;
-
-    while (running) {
-        /* 1. Gamepad. */
-        if (!gp_is_connected()) { err = "controller disconnected"; break; }
-        if (gp_get_button(BTN_EXIT)) break;
-
-        double ly = drive ? gp_get_axis(GP_AXIS_LY) : 0.0;   /* sticks ignored unless --drive */
-        double rx = drive ? gp_get_axis(GP_AXIS_RX) : 0.0;
-        int b = gp_get_button(BTN_ZERO_SPEED);
-        if (b && !prev_b) { stopped = 1; ctrl_zero_speed(&c); printf("STOP (centre both sticks to resume)\n"); }
-        prev_b = b;
-        if (stopped && ly == 0.0 && rx == 0.0 && !b) { stopped = 0; printf("Resumed\n"); }
-        ctrl_set_speed(&c, stopped ? 0.0 : ctrl_stick_speed(ly), LOOP_MS_DT);
-        double steer = stopped ? 0.0 : ctrl_stick_steer(rx);   /* strength scales with speed inside ctrl_update */
-
-        /* 2. Measurements. get_imu_pitch() returns 0.0 on a failed read, which becomes a pitch of about
-         * 175 deg here, so a failed read trips the cutoff and cuts the motors. (A pitch that repeats
-         * exactly is normal at rest: the IMU resolution is 1/16 deg.) */
-        double raw = get_imu_pitch();
-        pitch = wrap180(PITCH_ZERO_DEG - raw) - pitch_zero;   /* deg from the calibrated zero */
-        if (++window_count >= RATE_WINDOW_STEPS) {
-            double r = (pitch - pitch_at_window) / (RATE_WINDOW_STEPS * LOOP_MS_DT);
-            rate += RATE_FILTER * (r - rate);
-            pitch_at_window = pitch;
-            window_count = 0;
+    if (gui) {
+        static tune_t tn;
+        /* keep theta0 outside the "resting on a stop" zone and inside half the cutoff */
+        double lo = -0.5 * CUT_BACK_DEG, hi = 0.5 * CUT_FWD_DEG;
+        if (run.c.stops_valid) {
+            double sh = run.c.stop_fwd > run.c.stop_back ? run.c.stop_fwd : run.c.stop_back;
+            double sl = run.c.stop_fwd > run.c.stop_back ? run.c.stop_back : run.c.stop_fwd;
+            if (sl + NEAR_BLOCK_DEG > lo) lo = sl + NEAR_BLOCK_DEG;
+            if (sh - NEAR_BLOCK_DEG < hi) hi = sh - NEAR_BLOCK_DEG;
         }
-        double speed = enc_get_speed(FEEDBACK_ENC);
+        tn.theta0_min = lo; tn.theta0_max = hi;
+        tn.d_theta0 = THETA0_DEG; tn.d_kp = KP; tn.d_ki = KI; tn.d_kd = KD; tn.d_kv = KV;
+        atomic_store(&tn.theta0, theta0); atomic_store(&tn.kp, kp); atomic_store(&tn.ki, ki);
+        atomic_store(&tn.kd, kd); atomic_store(&tn.kv, kv);
+        tn.log_name = fname;
+        run.tune = &tn;
 
-        /* 3. Controller, then write exactly what is logged. */
-        ctrl_in_t in = { pitch, rate, speed, steer };
-        ctrl_out_t out;
-        int live = ctrl_update(&c, &in, &out);
-        if (live && !was_live) printf("Motors LIVE\n");
-        was_live = live;
-        if (c.tripped) { err = c.block_rest_ms >= BLOCK_REST_MS ? "resting on a block stop" : "cutoff exceeded"; motors_off(); }
-        float l = (float)out.left, r = (float)out.right;
-        if (pwm_set_duty(LEFT_CH, l) < 0 || pwm_set_duty(RIGHT_CH, r) < 0) {
-            err = "pwm_set_duty failed";
-            break;
+        pthread_t th;
+        if (pthread_create(&th, NULL, control_thread, &run) != 0) {
+            fprintf(stderr, "could not start the control thread\n");
+            run.err = "control thread failed";
+        } else {
+            tune_gui_run(&tn);                 /* returns when the window is closed */
+            atomic_store(&tn.quit, 1);
+            running = 0;
+            pthread_join(th, NULL);
         }
-
-        /* 4. One row every 20 ms. */
-        long t_ms = elapsed_ms(&start);
-        if (t_ms >= next_status_ms) {
-            printf("t %4.0f s  pitch %+6.2f deg (target %+.1f)  speed %+7.0f edges/s  %s\n", t_ms / 1000.0, pitch,
-                   out.pitch_target, speed, live ? "LIVE" : (c.armed ? "armed" : "waiting: hold the robot near the target"));
-            next_status_ms += 1000;
-        }
-        if (t_ms >= next_log_ms) {
-            fprintf(log, "%ld,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f\n", t_ms, c.speed_cmd,
-                    speed, pitch, out.pitch_target, out.error, out.pid_output, (double)l, (double)r);
-            next_log_ms += LOG_MS;
-            while (next_log_ms <= t_ms) next_log_ms += LOG_MS;
-        }
-        if (err) break;
-
-        tick(&next);
+        fclose(changes);
+    } else {
+        control_loop(&run);
     }
 
     fclose(log);
     shutdown_hw();
 
-    if (err) { fprintf(stderr, "Stopped: %s. Log closed: %s\n", err, fname); return 1; }
+    if (run.err) { fprintf(stderr, "Stopped: %s. Log closed: %s\n", run.err, fname); return 1; }
     printf("Exit. Log closed: %s\n", fname);
     return 0;
 }

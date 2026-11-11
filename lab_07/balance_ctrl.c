@@ -8,6 +8,7 @@ static double clamp(double x, double lim)
 
 void ctrl_init(ctrl_t *c)
 {
+    c->theta0 = THETA0_DEG;
     c->kv = KV;
     c->kp = KP;
     c->ki = KI;
@@ -21,6 +22,16 @@ void ctrl_init(ctrl_t *c)
     c->stops_valid = 1;
     c->stop_fwd  = STOP_FWD_RAW_DEG  - PITCH_ZERO_DEFAULT_DEG;
     c->stop_back = STOP_BACK_RAW_DEG - PITCH_ZERO_DEFAULT_DEG;
+}
+
+void ctrl_rearm(ctrl_t *c)
+{
+    c->integral = 0.0;
+    c->speed_cmd = 0.0;
+    c->armed = 0;
+    c->tripped = 0;
+    c->in_band_ms = 0;
+    c->block_rest_ms = 0;
 }
 
 void ctrl_set_stops(ctrl_t *c, double fwd, double back)
@@ -68,7 +79,7 @@ int ctrl_update(ctrl_t *c, const ctrl_in_t *in, ctrl_out_t *out)
     /* Speed error moves the pitch target, within a small range around theta0.
      * Forward speed wanted (positive error) leans the robot forward. */
     double speed_err = c->speed_cmd - in->speed;
-    out->pitch_target = THETA0_DEG + clamp(c->kv * speed_err, PITCH_TARGET_RANGE);
+    out->pitch_target = c->theta0 + clamp(c->kv * speed_err, PITCH_TARGET_RANGE);
     /* Lab 05 rule: the target stays inside half of the smaller cutoff. */
     double half_cut = 0.5 * (CUT_FWD_DEG < CUT_BACK_DEG ? CUT_FWD_DEG : CUT_BACK_DEG);
     out->pitch_target = clamp(out->pitch_target, half_cut);
@@ -90,7 +101,7 @@ int ctrl_update(ctrl_t *c, const ctrl_in_t *in, ctrl_out_t *out)
 
     /* Arming: near the balance angle for ARM_HOLD_MS before the motors go live. */
     if (!c->armed) {
-        if (fabs(in->pitch - THETA0_DEG) < ARM_BAND_DEG)
+        if (fabs(in->pitch - c->theta0) < ARM_BAND_DEG)
             c->in_band_ms++;
         else
             c->in_band_ms = 0;

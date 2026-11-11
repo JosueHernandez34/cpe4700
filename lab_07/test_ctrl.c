@@ -113,6 +113,16 @@ int main(void)
     CHECK(fabs(o.pid_output - 0.01 * 10.0) < 1e-3, "overridden Kd is used");
     in.pitch_rate = 0;
 
+    /* Runtime balance angle (tuning window) and re-arm after a trip. */
+    c = armed_ctrl(); c.theta0 = 3.0; in.pitch = 3.0; in.pitch_rate = 0; in.steer = 0; ctrl_update(&c, &in, &o);
+    CHECK(fabs(o.pitch_target - 3.0) < 1e-9 && fabs(o.error) < 1e-9, "balance angle can be changed at run time");
+    c = armed_ctrl(); in.pitch = CUT_FWD_DEG + 1; ctrl_update(&c, &in, &o);
+    CHECK(c.tripped, "trip before re-arm");
+    ctrl_rearm(&c); in.pitch = THETA0_DEG; live = ctrl_update(&c, &in, &o);
+    CHECK(!c.tripped && !c.armed && !live, "re-arm clears the trip and waits to arm again, gains kept");
+    for (int i = 0; i < ARM_HOLD_MS + 5; i++) live = ctrl_update(&c, &in, &o);
+    CHECK(live, "after re-arm the motors go live again once held near the angle");
+
     /* Block rest: sitting near a stop, hardly moving, for 1 s cuts the motors; moving does not. */
     c = armed_ctrl(); in.pitch = c.stop_fwd - 1.0; in.pitch_rate = 0;
     for (int i = 0; i < BLOCK_REST_MS - 2; i++) ctrl_update(&c, &in, &o);

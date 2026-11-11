@@ -64,6 +64,7 @@ _Static_assert(THETA0_DEG < (STOP_FWD_RAW_DEG - PITCH_ZERO_DEFAULT_DEG) - NEAR_B
 #define LOOP_MS_DT      ROBOT_LOOP_PERIOD_S
 
 typedef struct {
+    double theta0;        /* deg from the zero: the angle to balance at (starts at THETA0_DEG; the GUI changes it) */
     double kv;            /* deg of pitch target per (edges/s) of speed error (KV; --kv overrides) */
     double kp, ki, kd;    /* gains in force (start at KP, KI, KD from robot_params.h; lab07 --kp/--ki/--kd override) */
     double integral;      /* deg * s */
@@ -91,6 +92,7 @@ typedef struct {
 } ctrl_out_t;
 
 void ctrl_init(ctrl_t *c);
+void ctrl_rearm(ctrl_t *c);    /* clear a trip and go back to the arming wait; keeps gains, theta0 and stops */
 void ctrl_set_stops(ctrl_t *c, double fwd, double back);   /* from the calibration */
 
 /* Joysticks. Left stick up (negative LY, as the pad reports it) = forward speed; right stick left
