@@ -179,6 +179,13 @@ Josue replaced the gamepad because the earlier one was not working (the ZhiXu pa
 - Run 135511 shows a fast ripple (dominant pitch period 0.18 s, about 5.5 Hz, amplitude about 4 deg) and a PWM-to-speed correlation that turns negative at a 100 ms lag (-0.71) and positive again at 200 ms (+0.90). That is the lag Lab 05 also showed (5 to 8 Hz); the estimated 70 to 80 ms loop lag fits it. The robot was being moved by hand, so this is not a balance result yet.
 - Not yet recorded: a run with the robot on the floor, speed-command steps, steering, the P / P+D / P+D+I tuning steps and the disturbance run.
 
+### Joystick control (replaces the D-pad) 11/11
+- Left stick up/down = forward/reverse speed command (proportional, up to 2000 edges/s, ramps at 3000 edges/s per second); right stick left/right = steering (full deflection = 0.08 duty difference); B = stop until both sticks are centred; START = exit.
+- Off-robot checks: `cd lab_07 && make check` (37 checks pass, includes the stick mapping, ramp and clamps).
+- Gamepad mapping test (no motors, no IMU): `cd lab_07 && make joystick_test && ./joystick_test` (guided PASS/FAIL for rest, each stick direction, B and START) or `./joystick_test live`.
+- Controller seen on 11/11 afternoon: Bluetooth "Gamepad" (Bus 0005, 1949:0402, `/dev/input/event12`, js0).
+- First run of the guided test with nobody touching the sticks: rest check PASSED (all four axes at 0.00), the push steps timed out as expected (no input). The real result with the sticks pushed is not recorded yet. **Add it here.**
+
 ### Still to do
 Motor polarity and sensor results, tuning (P only, then P+D, then P+D+I, with Kp, Ki, Kd recorded for each), required runs (stationary balance, forward, reverse, left turn, right turn, small-disturbance recovery), plots (`python3 plot_lab07.py lab07_*.csv`), wireless gamepad.
 

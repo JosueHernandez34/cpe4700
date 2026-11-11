@@ -1,9 +1,11 @@
 /*
- * Lab 07: self-balancing robot, PID on pitch, speed command from the d-pad.
+ * Lab 07: self-balancing robot, PID on pitch, speed command from the joysticks.
  *
- * Gamepad:  D-pad Up/Down  raise forward / reverse speed command one step
- *           D-pad Left/Right  steer (neutral when released)
- *           B  zero the speed command      START  exit
+ * Gamepad:  Left stick up/down     forward / reverse speed command (ramps to the stick value)
+ *           Right stick left/right steer (neutral when released)
+ *           B  stop: zero the speed and steering until both sticks are centred again
+ *           START  exit
+ *           (check the mapping with no motors: make joystick_test && sudo ./joystick_test)
  * Gains, limits and safety values are in balance_ctrl.h (TUNING BLOCK).
  *
  * Pitch zero: the midpoint of the IMU readings at the two block stops (Lab 05 rule). Run
@@ -43,7 +45,6 @@
 #define LEFT_CH        ROBOT_LEFT_CH
 #define RIGHT_CH       ROBOT_RIGHT_CH
 #define FEEDBACK_ENC   ROBOT_FEEDBACK_ENC
-#define STEER_SIGN     ROBOT_STEER_SIGN
 #define PITCH_ZERO_DEG ROBOT_PITCH_RAW_UPRIGHT_DEG
 #define RATE_WINDOW_STEPS ROBOT_RATE_WINDOW_STEPS
 #define RATE_FILTER    ROBOT_RATE_FILTER
@@ -199,15 +200,6 @@ static double load_zero(double stops[2])
     return PITCH_ZERO_DEFAULT_DEG;
 }
 
-static void read_dpad(int *up, int *down, int *left, int *right)
-{
-    double hx = gp_get_axis(GP_AXIS_HAT_X), hy = gp_get_axis(GP_AXIS_HAT_Y);
-    *up    = hy < 0.0 || gp_get_button(BTN_DPAD_UP);
-    *down  = hy > 0.0 || gp_get_button(BTN_DPAD_DOWN);
-    *left  = hx < 0.0 || gp_get_button(BTN_DPAD_LEFT);
-    *right = hx > 0.0 || gp_get_button(BTN_DPAD_RIGHT);
-}
-
 static void motors_off(void)
 {
     pwm_set_duty(LEFT_CH, 0.0f);
@@ -288,13 +280,13 @@ int main(int argc, char **argv)
     fprintf(log, "time_ms,target_speed,measured_speed,pitch_deg,pitch_target_deg,error_deg,pid_output,left_pwm,right_pwm\n");
 
     printf("Logging to %s\nHold the robot near %.1f deg; motors go live after %d ms inside +/-%.1f deg.\n"
-           "D-pad Up/Down speed, Left/Right steer, B zero speed, START exit.\n",
+           "Left stick speed, right stick steer, B stop, START exit.\n",
            fname, THETA0_DEG, ARM_HOLD_MS, ARM_BAND_DEG);
 
     ctrl_t c;
     ctrl_init(&c);
     ctrl_set_stops(&c, stops[0], stops[1]);
-    int prev_up = 0, prev_down = 0, prev_b = 0, was_live = 0;
+    int prev_b = 0, was_live = 0, stopped = 0;
 
     double pitch = raw_pitch() - pitch_zero;
     double pitch_at_window = pitch, rate = 0.0;
@@ -311,14 +303,14 @@ int main(int argc, char **argv)
         if (!gp_is_connected()) { err = "controller disconnected"; break; }
         if (gp_get_button(BTN_EXIT)) break;
 
-        int up, down, left, right;
-        read_dpad(&up, &down, &left, &right);
-        if (up && !prev_up)     ctrl_step_speed(&c, +1);
-        if (down && !prev_down) ctrl_step_speed(&c, -1);
-        prev_up = up; prev_down = down;
+        double ly = gp_get_axis(GP_AXIS_LY);
+        double rx = gp_get_axis(GP_AXIS_RX);
         int b = gp_get_button(BTN_ZERO_SPEED);
-        if (b && !prev_b) ctrl_zero_speed(&c);
+        if (b && !prev_b) { stopped = 1; ctrl_zero_speed(&c); printf("STOP (centre both sticks to resume)\n"); }
         prev_b = b;
+        if (stopped && ly == 0.0 && rx == 0.0 && !b) { stopped = 0; printf("Resumed\n"); }
+        ctrl_set_speed(&c, stopped ? 0.0 : ctrl_stick_speed(ly), LOOP_MS_DT);
+        double steer = stopped ? 0.0 : ctrl_stick_steer(rx);
 
         /* 2. Measurements. get_imu_pitch() returns 0.0 on a failed read, which becomes a pitch of about
          * 175 deg here, so a failed read trips the cutoff and cuts the motors. (A pitch that repeats
@@ -334,7 +326,7 @@ int main(int argc, char **argv)
         double speed = enc_get_speed(FEEDBACK_ENC);
 
         /* 3. Controller, then write exactly what is logged. */
-        ctrl_in_t in = { pitch, rate, speed, STEER_SIGN * (left - right) };
+        ctrl_in_t in = { pitch, rate, speed, steer };
         ctrl_out_t out;
         int live = ctrl_update(&c, &in, &out);
         if (live && !was_live) printf("Motors LIVE\n");

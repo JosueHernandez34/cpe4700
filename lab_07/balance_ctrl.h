@@ -40,9 +40,9 @@
 #define I_LIMIT         0.15     /* anti-windup: |Ki * integral| never above this (duty) */
 #define KV              0.0010   /* deg of pitch target per (edges/s) of speed error */
 #define PITCH_TARGET_RANGE 3.0   /* pitch target stays within theta0 +/- this (deg) */
-#define SPEED_STEP      200.0    /* edges/s per d-pad press */
+#define SPEED_SLEW      3000.0   /* edges/s per second: the speed command ramps to the stick value at this rate */
 #define SPEED_MAX       2000.0   /* edges/s, clamp on the speed command */
-#define STEER_DUTY      0.08     /* duty difference between the wheels for a steering press */
+#define STEER_DUTY      0.08     /* duty difference between the wheels at full steering stick */
 
 /* Pitch zero rule (Lab 05 v2): see robot_params.h. "lab07 --cal" measures the stops and saves the zero;
  * the defaults there are used until pitch_zero.txt exists. */
@@ -76,7 +76,7 @@ typedef struct {
     double pitch;         /* deg */
     double pitch_rate;    /* deg/s, forward positive */
     double speed;         /* edges/s measured, forward positive */
-    int    steer;         /* -1, 0, +1 (+1 = d-pad left turn) */
+    double steer;         /* -1 .. +1 (+1 = full left turn) */
 } ctrl_in_t;
 
 typedef struct {
@@ -89,8 +89,13 @@ typedef struct {
 void ctrl_init(ctrl_t *c);
 void ctrl_set_stops(ctrl_t *c, double fwd, double back);   /* from the calibration */
 
-/* D-pad press: +1 raises the forward command one step, -1 raises the reverse command one step. */
-void ctrl_step_speed(ctrl_t *c, int dir);
+/* Joysticks. Left stick up (negative LY, as the pad reports it) = forward speed; right stick left
+ * (negative RX) = left turn. Both inputs are -1 .. +1 after the pad's own deadzone. */
+double ctrl_stick_speed(double ly);    /* target speed, edges/s */
+double ctrl_stick_steer(double rx);    /* steering, -1 .. +1, +1 = left turn */
+
+/* Move the speed command toward target at SPEED_SLEW (call every loop pass with dt in seconds). */
+void ctrl_set_speed(ctrl_t *c, double target, double dt);
 void ctrl_zero_speed(ctrl_t *c);
 
 /* One loop pass (call every LOOP_MS_DT). Returns 1 if the motors are live,

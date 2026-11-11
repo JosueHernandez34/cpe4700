@@ -60,19 +60,27 @@ int main(void)
     CHECK(fabs((o.right - o.left) - 2 * STEER_DUTY) < 1e-9, "steering splits the wheels by 2 * STEER_DUTY");
     in.steer = 0;
 
-    /* Speed command steps and clamps. */
-    c = armed_ctrl();
-    for (int i = 0; i < 50; i++) ctrl_step_speed(&c, +1);
+    /* Joysticks: left stick up (LY negative) is forward, right stick left (RX negative) is a left turn. */
+    CHECK(ctrl_stick_speed(-1.0) == SPEED_MAX && ctrl_stick_speed(1.0) == -SPEED_MAX, "left stick up = forward, down = reverse, full = SPEED_MAX");
+    CHECK(ctrl_stick_speed(0.0) == 0.0 && fabs(ctrl_stick_speed(-0.5) - 0.5 * SPEED_MAX) < 1e-9, "stick speed is proportional and zero at centre");
+    CHECK(ctrl_stick_steer(-1.0) == ROBOT_STEER_SIGN && ctrl_stick_steer(1.0) == -ROBOT_STEER_SIGN && ctrl_stick_steer(0.0) == 0.0,
+          "right stick left = left turn, right = right turn, zero at centre");
+    CHECK(fabs(ctrl_stick_steer(-3.0)) <= 1.0, "steering stays within +/-1");
+
+    /* Speed command ramps at SPEED_SLEW and clamps. */
+    c = armed_ctrl(); ctrl_set_speed(&c, SPEED_MAX, 0.001);
+    CHECK(fabs(c.speed_cmd - SPEED_SLEW * 0.001) < 1e-9, "speed command moves at most SPEED_SLEW * dt per pass");
+    for (int i = 0; i < 5000; i++) ctrl_set_speed(&c, 10 * SPEED_MAX, 0.001);
     CHECK(c.speed_cmd == SPEED_MAX, "speed command clamps at SPEED_MAX");
-    for (int i = 0; i < 100; i++) ctrl_step_speed(&c, -1);
+    for (int i = 0; i < 5000; i++) ctrl_set_speed(&c, -10 * SPEED_MAX, 0.001);
     CHECK(c.speed_cmd == -SPEED_MAX, "reverse command clamps at -SPEED_MAX");
     ctrl_zero_speed(&c);
     CHECK(c.speed_cmd == 0.0, "zero command resets the speed");
 
     /* Speed to pitch target: forward command leans forward, limited to the range. */
-    c = armed_ctrl(); in.pitch = THETA0_DEG; ctrl_step_speed(&c, +1);
+    c = armed_ctrl(); in.pitch = THETA0_DEG; c.speed_cmd = 200.0;
     ctrl_update(&c, &in, &o);
-    CHECK(fabs(o.pitch_target - (THETA0_DEG + KV * SPEED_STEP)) < 1e-9, "forward speed command raises the pitch target");
+    CHECK(fabs(o.pitch_target - (THETA0_DEG + KV * 200.0)) < 1e-9, "forward speed command raises the pitch target");
     c.speed_cmd = SPEED_MAX; in.speed = -100000; ctrl_update(&c, &in, &o);
     double top = THETA0_DEG + PITCH_TARGET_RANGE;
     double half_cut = 0.5 * (CUT_FWD_DEG < CUT_BACK_DEG ? CUT_FWD_DEG : CUT_BACK_DEG);

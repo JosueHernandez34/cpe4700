@@ -11,6 +11,10 @@ SRCS = main.c balance_ctrl.c $(MOD_DIR)/pwm.c $(MOD_DIR)/encoder.c $(MOD_DIR)/im
 lab07: $(SRCS) balance_ctrl.h
 	$(CC) $(CFLAGS) -o $@ $(SRCS) $(LDLIBS)
 
+# Gamepad mapping check. No motors, no IMU. Run: sudo ./joystick_test   (or: sudo ./joystick_test live)
+joystick_test: joystick_test.c balance_ctrl.c balance_ctrl.h $(MOD_DIR)/gamepad.c
+	$(CC) $(CFLAGS) -o $@ joystick_test.c balance_ctrl.c $(MOD_DIR)/gamepad.c -lpthread -lm
+
 # Control-logic check with fake measurements. No hardware, no motors.
 
 test_ctrl: test_ctrl.c balance_ctrl.c balance_ctrl.h
@@ -25,5 +29,5 @@ check: test_ctrl test_cutoff
 	./test_cutoff
 
 clean:
-	rm -f lab07 test_ctrl test_cutoff
+	rm -f lab07 test_ctrl test_cutoff joystick_test
 .PHONY: check clean

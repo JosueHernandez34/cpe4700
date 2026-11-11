@@ -30,9 +30,22 @@ void ctrl_set_stops(ctrl_t *c, double fwd, double back)
     }
 }
 
-void ctrl_step_speed(ctrl_t *c, int dir)
+double ctrl_stick_speed(double ly)
 {
-    c->speed_cmd = clamp(c->speed_cmd + dir * SPEED_STEP, SPEED_MAX);
+    return clamp(-ly * SPEED_MAX, SPEED_MAX);
+}
+
+double ctrl_stick_steer(double rx)
+{
+    return clamp(-rx * ROBOT_STEER_SIGN, 1.0);
+}
+
+void ctrl_set_speed(ctrl_t *c, double target, double dt)
+{
+    target = clamp(target, SPEED_MAX);
+    double step = SPEED_SLEW * dt;
+    double d = target - c->speed_cmd;
+    c->speed_cmd += clamp(d, step);
 }
 
 void ctrl_zero_speed(ctrl_t *c)
@@ -106,7 +119,7 @@ int ctrl_update(ctrl_t *c, const ctrl_in_t *in, ctrl_out_t *out)
     double u = out->pid_output;
     u += (fabs(u) >= DEADBAND_RAMP ? (u > 0 ? 1.0 : -1.0) : u / DEADBAND_RAMP) * DEADBAND_DUTY;
 
-    double usteer = in->steer * STEER_DUTY;
+    double usteer = clamp(in->steer, 1.0) * STEER_DUTY;
     out->left  = clamp(u - usteer, MAX_DUTY);
     out->right = clamp(u + usteer, MAX_DUTY);
     return 1;
