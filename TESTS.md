@@ -186,6 +186,12 @@ Josue replaced the gamepad because the earlier one was not working (the ZhiXu pa
 - Controller seen on 11/11 afternoon: Bluetooth "Gamepad" (Bus 0005, 1949:0402, `/dev/input/event12`, js0).
 - First run of the guided test with nobody touching the sticks: rest check PASSED (all four axes at 0.00), the push steps timed out as expected (no input). The real result with the sticks pushed is not recorded yet. **Add it here.**
 
+### Balance in place first, steering that veers (11/11)
+- `sudo ./lab07` now ignores the sticks by default: it only tries to hold the balance angle (speed and steering stay zero). `--drive` turns the sticks on. `--kv 0` removes the speed-to-pitch hold (pure pitch PID); `--kp/--ki/--kd` set the gains.
+- Steering strength now scales with the speed command (full at 1000 edges/s), so the robot veers while moving and does not pivot on the spot; at a standstill the right stick does nothing.
+- Off-robot checks: 42 pass (standstill gives equal wheel commands, half speed gives half strength, reverse works, Kv 0 keeps the pitch target at theta0).
+- Robot results: not recorded yet. **Add them here.**
+
 ### Still to do
 Motor polarity and sensor results, tuning (P only, then P+D, then P+D+I, with Kp, Ki, Kd recorded for each), required runs (stationary balance, forward, reverse, left turn, right turn, small-disturbance recovery), plots (`python3 plot_lab07.py lab07_*.csv`), wireless gamepad.
 

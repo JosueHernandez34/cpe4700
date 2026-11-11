@@ -8,6 +8,7 @@ static double clamp(double x, double lim)
 
 void ctrl_init(ctrl_t *c)
 {
+    c->kv = KV;
     c->kp = KP;
     c->ki = KI;
     c->kd = KD;
@@ -51,6 +52,12 @@ void ctrl_set_speed(ctrl_t *c, double target, double dt)
     c->speed_cmd += clamp(d, step);
 }
 
+double ctrl_steer_scale(const ctrl_t *c)
+{
+    double s = fabs(c->speed_cmd) / STEER_FULL_SPEED;
+    return s > 1.0 ? 1.0 : s;
+}
+
 void ctrl_zero_speed(ctrl_t *c)
 {
     c->speed_cmd = 0.0;
@@ -61,7 +68,7 @@ int ctrl_update(ctrl_t *c, const ctrl_in_t *in, ctrl_out_t *out)
     /* Speed error moves the pitch target, within a small range around theta0.
      * Forward speed wanted (positive error) leans the robot forward. */
     double speed_err = c->speed_cmd - in->speed;
-    out->pitch_target = THETA0_DEG + clamp(KV * speed_err, PITCH_TARGET_RANGE);
+    out->pitch_target = THETA0_DEG + clamp(c->kv * speed_err, PITCH_TARGET_RANGE);
     /* Lab 05 rule: the target stays inside half of the smaller cutoff. */
     double half_cut = 0.5 * (CUT_FWD_DEG < CUT_BACK_DEG ? CUT_FWD_DEG : CUT_BACK_DEG);
     out->pitch_target = clamp(out->pitch_target, half_cut);
@@ -124,7 +131,8 @@ int ctrl_update(ctrl_t *c, const ctrl_in_t *in, ctrl_out_t *out)
     double u = out->pid_output;
     u += (fabs(u) >= DEADBAND_RAMP ? (u > 0 ? 1.0 : -1.0) : u / DEADBAND_RAMP) * DEADBAND_DUTY;
 
-    double usteer = clamp(in->steer, 1.0) * STEER_DUTY;
+    /* Steering strength grows with speed, so the robot veers while moving and does not pivot at a standstill. */
+    double usteer = clamp(in->steer, 1.0) * STEER_DUTY * ctrl_steer_scale(c);
     out->left  = clamp(u - usteer, MAX_DUTY);
     out->right = clamp(u + usteer, MAX_DUTY);
     return 1;

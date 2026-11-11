@@ -57,7 +57,13 @@ int main(void)
 
     /* Steering: uL = u - usteer, uR = u + usteer. */
     c = armed_ctrl(); in.pitch = THETA0_DEG + 1; in.steer = 1; ctrl_update(&c, &in, &o);
-    CHECK(fabs((o.right - o.left) - 2 * STEER_DUTY) < 1e-9, "steering splits the wheels by 2 * STEER_DUTY");
+    CHECK(o.right == o.left, "no steering at a standstill (speed command 0): the robot does not pivot");
+    c = armed_ctrl(); c.speed_cmd = STEER_FULL_SPEED; ctrl_update(&c, &in, &o);
+    CHECK(fabs((o.right - o.left) - 2 * STEER_DUTY) < 1e-9, "steering splits the wheels by 2 * STEER_DUTY at full steering speed");
+    c = armed_ctrl(); c.speed_cmd = 0.5 * STEER_FULL_SPEED; ctrl_update(&c, &in, &o);
+    CHECK(fabs((o.right - o.left) - STEER_DUTY) < 1e-9, "steering is half strength at half the steering speed");
+    c = armed_ctrl(); c.speed_cmd = -STEER_FULL_SPEED; ctrl_update(&c, &in, &o);
+    CHECK(fabs((o.right - o.left) - 2 * STEER_DUTY) < 1e-9, "steering strength depends on |speed|, so reverse works too");
     in.steer = 0;
 
     /* Joysticks: left stick up (LY negative) is forward, right stick left (RX negative) is a left turn. */
@@ -94,6 +100,10 @@ int main(void)
     c = armed_ctrl(); in.pitch = THETA0_DEG + 4;
     for (int i = 0; i < 60000; i++) ctrl_update(&c, &in, &o);
     CHECK(fabs(KI * c.integral) <= I_LIMIT + 1e-9, "integral term stays within I_LIMIT");
+
+    /* Kv can be switched off: no speed-to-pitch hold. */
+    c = armed_ctrl(); c.kv = 0.0; c.speed_cmd = 1000.0; in.pitch = THETA0_DEG; in.steer = 0; ctrl_update(&c, &in, &o);
+    CHECK(fabs(o.pitch_target - THETA0_DEG) < 1e-9, "Kv 0: pitch target stays at theta0");
 
     /* Gains can be overridden at run time (P only, then P+D, then P+D+I). */
     c = armed_ctrl(); c.kd = 0.0; c.ki = 0.0; in.pitch = THETA0_DEG + 3; in.pitch_rate = 50;

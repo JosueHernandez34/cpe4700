@@ -170,8 +170,8 @@ static void live(void)
         if (gp_get_button(BTN_SOUTH)) ctrl_zero_speed(&c);
         ctrl_set_speed(&c, ctrl_stick_speed(ly), 0.05);   /* this loop runs at 20 Hz */
         double steer = ctrl_stick_steer(rx);
-        printf("\rLX %+.2f LY %+.2f | RX %+.2f RY %+.2f | speed target %+6.0f  command %+6.0f edges/s | steer %+.2f (%+.3f duty)   ",
-               gp_get_axis(GP_AXIS_LX), ly, rx, gp_get_axis(GP_AXIS_RY), ctrl_stick_speed(ly), c.speed_cmd, steer, steer * STEER_DUTY);
+        printf("\rLX %+.2f LY %+.2f | RX %+.2f RY %+.2f | speed target %+6.0f  command %+6.0f edges/s | steer %+.2f x speed scale %.2f = %+.3f duty   ",
+               gp_get_axis(GP_AXIS_LX), ly, rx, gp_get_axis(GP_AXIS_RY), ctrl_stick_speed(ly), c.speed_cmd, steer, ctrl_steer_scale(&c), steer * ctrl_steer_scale(&c) * STEER_DUTY);
         fflush(stdout);
         sleep_ms(50);
     }

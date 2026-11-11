@@ -42,7 +42,9 @@
 #define PITCH_TARGET_RANGE 3.0   /* pitch target stays within theta0 +/- this (deg) */
 #define SPEED_SLEW      3000.0   /* edges/s per second: the speed command ramps to the stick value at this rate */
 #define SPEED_MAX       2000.0   /* edges/s, clamp on the speed command */
-#define STEER_DUTY      0.08     /* duty difference between the wheels at full steering stick */
+#define STEER_DUTY      0.08     /* duty difference between the wheels at full steering stick and full steering speed */
+#define STEER_FULL_SPEED 1000.0  /* edges/s: steering reaches its full strength at this speed command; below it the
+                                  * strength scales with speed, so at a standstill the stick does nothing (no spin on the spot) */
 
 /* Pitch zero rule (Lab 05 v2): see robot_params.h. "lab07 --cal" measures the stops and saves the zero;
  * the defaults there are used until pitch_zero.txt exists. */
@@ -62,6 +64,7 @@ _Static_assert(THETA0_DEG < (STOP_FWD_RAW_DEG - PITCH_ZERO_DEFAULT_DEG) - NEAR_B
 #define LOOP_MS_DT      ROBOT_LOOP_PERIOD_S
 
 typedef struct {
+    double kv;            /* deg of pitch target per (edges/s) of speed error (KV; --kv overrides) */
     double kp, ki, kd;    /* gains in force (start at KP, KI, KD from robot_params.h; lab07 --kp/--ki/--kd override) */
     double integral;      /* deg * s */
     double speed_cmd;     /* edges/s, signed */
@@ -98,6 +101,7 @@ double ctrl_stick_steer(double rx);    /* steering, -1 .. +1, +1 = left turn */
 /* Move the speed command toward target at SPEED_SLEW (call every loop pass with dt in seconds). */
 void ctrl_set_speed(ctrl_t *c, double target, double dt);
 void ctrl_zero_speed(ctrl_t *c);
+double ctrl_steer_scale(const ctrl_t *c);   /* 0 .. 1, grows with |speed command| up to STEER_FULL_SPEED */
 
 /* One loop pass (call every LOOP_MS_DT). Returns 1 if the motors are live,
  * 0 if they are off (not armed yet, or tripped). out is always filled. */

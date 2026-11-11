@@ -5,6 +5,14 @@
  *           Right stick left/right steer (neutral when released)
  *           B  stop: zero the speed and steering until both sticks are centred again
  *           START  exit
+ * Default is BALANCE IN PLACE: the sticks are ignored (speed and steering stay zero) and the robot only
+ * tries to hold its balance angle. Add --drive to turn the sticks on. --kv 0 switches the speed-to-pitch
+ * hold off (pure pitch PID); the default Kv in balance_ctrl.h also tries to hold the robot in place.
+ *   sudo ./lab07 --kp 0.015 --ki 0 --kd 0.005                 balance in place
+ *   sudo ./lab07 --drive --kp 0.015 --ki 0.005 --kd 0.005     sticks on
+ * Steering strength grows with speed (full at STEER_FULL_SPEED), so it veers while moving and never
+ * pivots on the spot.
+ *
  * Gains: defaults are Kp/Ki/Kd in robot_params.h. For tuning, override them without rebuilding:
  *   sudo ./lab07 --kp 0.015 --ki 0 --kd 0       P only
  *   sudo ./lab07 --kp 0.015 --ki 0 --kd 0.005   P + D
@@ -224,11 +232,14 @@ int main(int argc, char **argv)
 {
     const char *dev = NULL;
     int cal = 0, cal_bal = 0, have_zero = 0;
-    double kp = KP, ki = KI, kd = KD;
+    double kp = KP, ki = KI, kd = KD, kv = KV;
+    int drive = 0;
     double typed_zero = 0.0;
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--cal") == 0) cal = 1;
         else if (strcmp(argv[i], "--cal-balance") == 0) cal_bal = 1;
+        else if (strcmp(argv[i], "--drive") == 0) drive = 1;
+        else if (strcmp(argv[i], "--kv") == 0 && i + 1 < argc) kv = atof(argv[++i]);
         else if (strcmp(argv[i], "--kp") == 0 && i + 1 < argc) kp = atof(argv[++i]);
         else if (strcmp(argv[i], "--ki") == 0 && i + 1 < argc) ki = atof(argv[++i]);
         else if (strcmp(argv[i], "--kd") == 0 && i + 1 < argc) kd = atof(argv[++i]);
@@ -285,7 +296,7 @@ int main(int argc, char **argv)
     time_t wall = time(NULL);
     char stamp[32];
     strftime(stamp, sizeof stamp, "%Y%m%d_%H%M%S", localtime(&wall));
-    snprintf(fname, sizeof fname, "lab07_%s_kp%g_ki%g_kd%g.csv", stamp, kp, ki, kd);
+    snprintf(fname, sizeof fname, "lab07_%s_kp%g_ki%g_kd%g%s.csv", stamp, kp, ki, kd, drive ? "_drive" : "");
     FILE *log = fopen(fname, "w");
     if (!log) { perror(fname); shutdown_hw(); return 1; }
     fprintf(log, "time_ms,target_speed,measured_speed,pitch_deg,pitch_target_deg,error_deg,pid_output,left_pwm,right_pwm\n");
@@ -297,8 +308,9 @@ int main(int argc, char **argv)
     ctrl_t c;
     ctrl_init(&c);
     ctrl_set_stops(&c, stops[0], stops[1]);
-    c.kp = kp; c.ki = ki; c.kd = kd;
-    printf("Gains: Kp %g, Ki %g, Kd %g\n", kp, ki, kd);
+    c.kp = kp; c.ki = ki; c.kd = kd; c.kv = kv;
+    printf("Gains: Kp %g, Ki %g, Kd %g, Kv %g. %s\n", kp, ki, kd, kv,
+           drive ? "Sticks ON." : "Balance in place only: sticks are ignored (add --drive to use them).");
     int prev_b = 0, was_live = 0, stopped = 0;
 
     double pitch = raw_pitch() - pitch_zero;
@@ -316,14 +328,14 @@ int main(int argc, char **argv)
         if (!gp_is_connected()) { err = "controller disconnected"; break; }
         if (gp_get_button(BTN_EXIT)) break;
 
-        double ly = gp_get_axis(GP_AXIS_LY);
-        double rx = gp_get_axis(GP_AXIS_RX);
+        double ly = drive ? gp_get_axis(GP_AXIS_LY) : 0.0;   /* sticks ignored unless --drive */
+        double rx = drive ? gp_get_axis(GP_AXIS_RX) : 0.0;
         int b = gp_get_button(BTN_ZERO_SPEED);
         if (b && !prev_b) { stopped = 1; ctrl_zero_speed(&c); printf("STOP (centre both sticks to resume)\n"); }
         prev_b = b;
         if (stopped && ly == 0.0 && rx == 0.0 && !b) { stopped = 0; printf("Resumed\n"); }
         ctrl_set_speed(&c, stopped ? 0.0 : ctrl_stick_speed(ly), LOOP_MS_DT);
-        double steer = stopped ? 0.0 : ctrl_stick_steer(rx);
+        double steer = stopped ? 0.0 : ctrl_stick_steer(rx);   /* strength scales with speed inside ctrl_update */
 
         /* 2. Measurements. get_imu_pitch() returns 0.0 on a failed read, which becomes a pitch of about
          * 175 deg here, so a failed read trips the cutoff and cuts the motors. (A pitch that repeats
