@@ -164,6 +164,21 @@ They cover: motors off before the 0.5 s arming hold and live after; forward lean
 - Cause (my code): before arming, a pitch outside +/-15 deg was treated as a tip-over and ended the run; a "frozen IMU" check could also fire on a robot at rest (the IMU repeats exact values, the back stop read "moved 0.00 deg" for 1 s). Both removed: out-of-range pitch before arming now just keeps the motors off, and a failed IMU read (pitch near 175 deg) trips the cutoff once armed. A status line now prints every second (pitch, speed, waiting / armed / LIVE).
 - The gamepad seen on 11/11 is a "ZhiXu Gamepad" (USB 0079:181c, `/dev/input/event11`, js0), keys 0x130 to 0x13e, axes X Y Z RZ GAS BRAKE and HAT0X/HAT0Y. Josue reports X and Y are swapped compared with the Lab 06 codes (X = BTN_WEST). Calibration now accepts either BTN_WEST or BTN_NORTH as X.
 
+### 11/11 first logged runs (new controller, wheels in the air)
+Josue replaced the gamepad because the earlier one was not working (the ZhiXu pad was seen on 11/11 before that; check `/proc/bus/input/devices` for what is plugged in now). Three runs were logged and plotted
+(`lab_07/lab07_20261111_135442.csv`, `..._135454.csv`, `..._135511.csv` with matching .png; CSVs are not in git). The motors went live, so the arming step and the loop work.
+
+| Run | Length | Live | Pitch while live (deg) | Mean abs speed error | At the 0.60 clamp | Ended |
+|---|---|---|---|---|---|---|
+| 135442 | 5.0 s | 4.5 s (from 0.54 s) | -13.1 to +1.8 | 628 edges/s | 0.4 % | pitch -13.1, PWM -0.60 |
+| 135454 | 11.6 s | 3.2 s (from 8.4 s) | -14.6 to +2.2 | 528 edges/s | 2.5 % | pitch -14.6, PWM -0.58 |
+| 135511 | 24.2 s | 8.5 s (from 15.7 s) | -13.9 to +5.4 | 1300 edges/s | 10.3 % | pitch -13.9, PWM -0.60 |
+
+- Signs: PWM follows pitch (correlation +0.72 to +0.91, positive pitch gives positive duty, as designed) and the measured encoder speed follows the PWM with the same sign (correlation +0.85 to +0.91 at 0 to 60 ms lag in the first two runs). So the encoder sign matches the duty sign. Whether positive pitch really is a forward lean, and whether the wheel really turns forward, still needs a visual confirmation from Josue.
+- Every run ended with the pitch near -13 to -15 deg and the PWM at about -0.60: the cutoff at -15 from the zero cuts the motors there. With the wheels in the air the motors cannot change the pitch, so this is expected for this setup.
+- Run 135511 shows a fast ripple (dominant pitch period 0.18 s, about 5.5 Hz, amplitude about 4 deg) and a PWM-to-speed correlation that turns negative at a 100 ms lag (-0.71) and positive again at 200 ms (+0.90). That is the lag Lab 05 also showed (5 to 8 Hz); the estimated 70 to 80 ms loop lag fits it. The robot was being moved by hand, so this is not a balance result yet.
+- Not yet recorded: a run with the robot on the floor, speed-command steps, steering, the P / P+D / P+D+I tuning steps and the disturbance run.
+
 ### Still to do
 Motor polarity and sensor results, tuning (P only, then P+D, then P+D+I, with Kp, Ki, Kd recorded for each), required runs (stationary balance, forward, reverse, left turn, right turn, small-disturbance recovery), plots (`python3 plot_lab07.py lab07_*.csv`), wireless gamepad.
 
