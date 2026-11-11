@@ -12,3 +12,7 @@ modules/gamepad_drive
 lab_06/lab06
 lab_06/gamepad_test
 lab_06/gamepad_drive
+lab_07/lab07
+lab_07/test_ctrl
+lab_07/test_cutoff
+lab_07/pitch_zero.txt

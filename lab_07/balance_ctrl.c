@@ -1,0 +1,106 @@
+#include <math.h>
+#include "balance_ctrl.h"
+
+static double clamp(double x, double lim)
+{
+    return x > lim ? lim : (x < -lim ? -lim : x);
+}
+
+void ctrl_init(ctrl_t *c)
+{
+    c->integral = 0.0;
+    c->speed_cmd = 0.0;
+    c->armed = 0;
+    c->tripped = 0;
+    c->in_band_ms = 0;
+    c->block_rest_ms = 0;
+    c->stop_fwd  = STOP_FWD_RAW_DEG  - PITCH_ZERO_DEFAULT_DEG;
+    c->stop_back = STOP_BACK_RAW_DEG - PITCH_ZERO_DEFAULT_DEG;
+}
+
+void ctrl_set_stops(ctrl_t *c, double fwd, double back)
+{
+    if (isfinite(fwd) && isfinite(back)) {
+        c->stop_fwd = fwd;
+        c->stop_back = back;
+    }
+}
+
+void ctrl_step_speed(ctrl_t *c, int dir)
+{
+    c->speed_cmd = clamp(c->speed_cmd + dir * SPEED_STEP, SPEED_MAX);
+}
+
+void ctrl_zero_speed(ctrl_t *c)
+{
+    c->speed_cmd = 0.0;
+}
+
+int ctrl_update(ctrl_t *c, const ctrl_in_t *in, ctrl_out_t *out)
+{
+    /* Speed error moves the pitch target, within a small range around theta0.
+     * Forward speed wanted (positive error) leans the robot forward. */
+    double speed_err = c->speed_cmd - in->speed;
+    out->pitch_target = THETA0_DEG + clamp(KV * speed_err, PITCH_TARGET_RANGE);
+    /* Lab 05 rule: the target stays inside half of the smaller cutoff. */
+    double half_cut = 0.5 * (CUT_FWD_DEG < CUT_BACK_DEG ? CUT_FWD_DEG : CUT_BACK_DEG);
+    out->pitch_target = clamp(out->pitch_target, half_cut);
+    out->error = out->pitch_target - in->pitch;
+    out->pid_output = 0.0;
+    out->left = 0.0;
+    out->right = 0.0;
+
+    /* Safety: tip-over latches the motors off. */
+    if (c->tripped || !isfinite(in->pitch) || in->pitch > CUT_FWD_DEG || in->pitch < -CUT_BACK_DEG) {
+        c->tripped = 1;
+        c->armed = 0;
+        c->integral = 0.0;
+        return 0;
+    }
+
+    /* Arming: near the balance angle for ARM_HOLD_MS before the motors go live. */
+    if (!c->armed) {
+        if (fabs(in->pitch - THETA0_DEG) < ARM_BAND_DEG)
+            c->in_band_ms++;
+        else
+            c->in_band_ms = 0;
+        if (c->in_band_ms >= ARM_HOLD_MS)
+            c->armed = 1;
+        c->integral = 0.0;
+        return 0;
+    }
+
+    /* Block-rest trip: resting against a stop (Lab 05 v2). */
+    double hi = c->stop_fwd > c->stop_back ? c->stop_fwd : c->stop_back;
+    double lo = c->stop_fwd > c->stop_back ? c->stop_back : c->stop_fwd;
+    int near_block = in->pitch >= hi - NEAR_BLOCK_DEG || in->pitch <= lo + NEAR_BLOCK_DEG;
+    if (near_block && fabs(in->pitch_rate) < NEAR_BLOCK_RATE) {
+        if (++c->block_rest_ms >= BLOCK_REST_MS) {
+            c->tripped = 1;
+            c->armed = 0;
+            c->integral = 0.0;
+            return 0;
+        }
+    } else {
+        c->block_rest_ms = 0;
+    }
+
+    /* P, I and D written out. Derivative is on the measurement: de/dt = -pitch_rate
+     * (the target moves slowly, so this avoids a kick when the speed command steps). */
+    double p = KP * out->error;
+    c->integral += out->error * LOOP_MS_DT;
+    if (KI > 0.0)
+        c->integral = clamp(c->integral, I_LIMIT / KI);   /* anti-windup */
+    double i = KI * c->integral;
+    double d = KD * (-in->pitch_rate);
+    out->pid_output = DRIVE_SIGN * (p + i + d);
+
+    /* Lab 04 deadband compensation, ramped through zero. */
+    double u = out->pid_output;
+    u += (fabs(u) >= DEADBAND_RAMP ? (u > 0 ? 1.0 : -1.0) : u / DEADBAND_RAMP) * DEADBAND_DUTY;
+
+    double usteer = in->steer * STEER_DUTY;
+    out->left  = clamp(u - usteer, MAX_DUTY);
+    out->right = clamp(u + usteer, MAX_DUTY);
+    return 1;
+}
