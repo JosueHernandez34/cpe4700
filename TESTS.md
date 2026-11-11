@@ -190,7 +190,15 @@ Josue replaced the gamepad because the earlier one was not working (the ZhiXu pa
 - `sudo ./lab07` now ignores the sticks by default: it only tries to hold the balance angle (speed and steering stay zero). `--drive` turns the sticks on. `--kv 0` removes the speed-to-pitch hold (pure pitch PID); `--kp/--ki/--kd` set the gains.
 - Steering strength now scales with the speed command (full at 1000 edges/s), so the robot veers while moving and does not pivot on the spot; at a standstill the right stick does nothing.
 - Off-robot checks: 42 pass (standstill gives equal wheel commands, half speed gives half strength, reverse works, Kv 0 keeps the pitch target at theta0).
-- Robot results: not recorded yet. **Add them here.**
+- Robot results (14:14 to 14:15, Kp 0.015, Ki 0, Kd 0.005, balance in place, sticks ignored, so target speed and steering stayed 0 as designed):
+
+| Run | Live | Pitch error (deg) | Longest time within +/-5 deg of the target | Ripple | Ended |
+|---|---|---|---|---|---|
+| 141458 | 5.5 s | std 3.04, max 12.9 | 4.7 s | 0.16 s period, 4.0 deg | pitch +14.9, PWM +0.46 (fell forward) |
+| 141521 | 28.3 s | std 1.57, max 10.2 | 28.3 s (the whole live time) | 0.17 s period, 2.4 deg | pitch +12.2, PWM +0.60 (fell forward) |
+
+  The 28 s run is the first sustained balance on this robot in Lab 07 (Lab 05's best hold was 21.9 s). Both runs ended falling forward with the PWM at or near the clamp. The fast ripple (about 6 Hz) is the same one seen in Lab 05 and fits the estimated 70 to 80 ms loop lag.
+- Earlier runs at 14:08 to 14:12 (Kp 0.015, Ki 0, Kd 0 and 0.005, sticks on, older code) logged target speeds of +/-2000 edges/s and left/right PWM differences up to 0.16, so the sticks worked then.
 
 ### Still to do
 Motor polarity and sensor results, tuning (P only, then P+D, then P+D+I, with Kp, Ki, Kd recorded for each), required runs (stationary balance, forward, reverse, left turn, right turn, small-disturbance recovery), plots (`python3 plot_lab07.py lab07_*.csv`), wireless gamepad.
