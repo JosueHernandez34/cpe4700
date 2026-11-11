@@ -203,6 +203,9 @@ Josue replaced the gamepad because the earlier one was not working (the ZhiXu pa
 ### Tuning window (`sudo -E ./lab07 --gui`), 11/11
 - Sliders and number boxes for balance angle, Kp, Ki, Kd and Kv change them while the robot runs; status readout (waiting / armed / LIVE / TRIPPED, pitch, speed, duty); Re-arm after a trip (the run continues); Reset to defaults; every change is written to `lab07_<time>_gui_changes.csv`. Run it on the Jetson's own screen (`sudo -E` keeps the display settings). Off-robot checks: 47 pass. Not yet run on the robot.
 
+### Angle and gains from the command line
+`sudo ./lab07 --theta0 3 --kp 0.02 --ki 0 --kd 0.002 --kv 0` (add `--drive` for the sticks, `--gui` for the window). The log name now contains the angle and the gains, for example `lab07_<time>_th3_kp0.02_ki0_kd0.002.csv`. An angle within 2.5 deg of a block stop, or beyond half the cutoff, is refused before anything starts (with the saved stops +/-7.81 deg the allowed range is -5.31 to +5.31 deg).
+
 ### Gain comparison from the logged runs (11/11, wheels on the floor, balance in place, theta0 2)
 Every log so far has Ki = 0: **no run with all three of P, I and D exists yet.**
 

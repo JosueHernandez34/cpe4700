@@ -18,7 +18,9 @@
  * this mode: press Re-arm in the window, then hold the robot near the angle again. Every change is
  * written to lab07_<time>_gui_changes.csv next to the run log.
  *
- * Gains: defaults are Kp/Ki/Kd in robot_params.h. For tuning, override them without rebuilding:
+ * Gains and angle: defaults are in robot_params.h. For tuning, set them on the command line (no rebuild):
+ *   sudo ./lab07 --theta0 3 --kp 0.02 --ki 0 --kd 0.002 --kv 0
+ *   --theta0 is in degrees from the saved zero; it is refused if it is within 2.5 deg of a block stop.
  *   sudo ./lab07 --kp 0.015 --ki 0 --kd 0       P only
  *   sudo ./lab07 --kp 0.015 --ki 0 --kd 0.005   P + D
  *   sudo ./lab07 --kp 0.015 --ki 0.005 --kd 0.005   P + D + I (the defaults)
@@ -441,7 +443,7 @@ int main(int argc, char **argv)
     time_t wall = time(NULL);
     char stamp[32];
     strftime(stamp, sizeof stamp, "%Y%m%d_%H%M%S", localtime(&wall));
-    snprintf(fname, sizeof fname, "lab07_%s_kp%g_ki%g_kd%g%s%s.csv", stamp, kp, ki, kd, drive ? "_drive" : "", gui ? "_gui" : "");
+    snprintf(fname, sizeof fname, "lab07_%s_th%g_kp%g_ki%g_kd%g%s%s.csv", stamp, theta0, kp, ki, kd, drive ? "_drive" : "", gui ? "_gui" : "");
     snprintf(cname, sizeof cname, "lab07_%s%s_changes.csv", stamp, gui ? "_gui" : "");
     FILE *log = fopen(fname, "w");
     if (!log) { perror(fname); shutdown_hw(); return 1; }
@@ -465,16 +467,25 @@ int main(int argc, char **argv)
     printf("Angle %g deg, Kp %g, Ki %g, Kd %g, Kv %g. %s\n", theta0, kp, ki, kd, kv,
            drive ? "Sticks ON." : "Balance in place only: sticks are ignored (add --drive to use them).");
 
+    /* Allowed balance angles: inside half the cutoff, and outside the "resting on a stop" zone. */
+    double lo = -0.5 * CUT_BACK_DEG, hi = 0.5 * CUT_FWD_DEG;
+    if (run.c.stops_valid) {
+        double sh = run.c.stop_fwd > run.c.stop_back ? run.c.stop_fwd : run.c.stop_back;
+        double sl = run.c.stop_fwd > run.c.stop_back ? run.c.stop_back : run.c.stop_fwd;
+        if (sl + NEAR_BLOCK_DEG > lo) lo = sl + NEAR_BLOCK_DEG;
+        if (sh - NEAR_BLOCK_DEG < hi) hi = sh - NEAR_BLOCK_DEG;
+    }
+    if (theta0 < lo || theta0 > hi) {
+        fprintf(stderr, "--theta0 %g is outside the allowed range %.2f to %.2f deg (it must stay %.1f deg away from the block stops "
+                "and inside half the cutoff). Nothing was started.\n", theta0, lo, hi, NEAR_BLOCK_DEG);
+        fclose(log);
+        if (changes) fclose(changes);
+        shutdown_hw();
+        return 1;
+    }
+
     if (gui) {
         static tune_t tn;
-        /* keep theta0 outside the "resting on a stop" zone and inside half the cutoff */
-        double lo = -0.5 * CUT_BACK_DEG, hi = 0.5 * CUT_FWD_DEG;
-        if (run.c.stops_valid) {
-            double sh = run.c.stop_fwd > run.c.stop_back ? run.c.stop_fwd : run.c.stop_back;
-            double sl = run.c.stop_fwd > run.c.stop_back ? run.c.stop_back : run.c.stop_fwd;
-            if (sl + NEAR_BLOCK_DEG > lo) lo = sl + NEAR_BLOCK_DEG;
-            if (sh - NEAR_BLOCK_DEG < hi) hi = sh - NEAR_BLOCK_DEG;
-        }
         tn.theta0_min = lo; tn.theta0_max = hi;
         tn.d_theta0 = THETA0_DEG; tn.d_kp = KP; tn.d_ki = KI; tn.d_kd = KD; tn.d_kv = KV;
         atomic_store(&tn.theta0, theta0); atomic_store(&tn.kp, kp); atomic_store(&tn.ki, ki);
