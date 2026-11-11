@@ -80,6 +80,7 @@ typedef struct {
     int    tripped;       /* latched: tip-over seen, motors stay off */
     int    in_band_ms;
     int    block_rest_ms;
+    int    stops_valid;   /* 0 = no block stops known (stopper removed): block-rest trip is off */
     double stop_fwd, stop_back;   /* block stops, deg from the zero (forward positive, back negative) */
 } ctrl_t;
 

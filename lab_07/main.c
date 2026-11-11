@@ -11,6 +11,13 @@
  *                         hold it on the back stop and press B. The zero is saved in pitch_zero.txt
  *                         and used by every later run. Without a file, balance_ctrl.h defaults are used.
  *
+ *   sudo ./lab07 --cal-balance   with NO stopper: hold the robot balanced (or let it balance), press X; it
+ *                         averages 3 s of pitch and saves that as the zero. No stops are saved, so the
+ *                         block-rest trip is off.
+ *   sudo ./lab07 --zero 4.2   type the IMU pitch (raw frame) to use as zero; also saved without stops.
+ * The IMU pitch is measured against gravity (BNO055 NDOF fusion), so a saved zero stays valid between
+ * runs; redo it only if the IMU is remounted or the weight moves.
+ *
  * Robot must be supported above the floor for the sensor and polarity checks.
  * Run with sudo (sysfs PWM and GPIO). Writes lab07_YYYYmmdd_HHMMSS.csv here.
  */
@@ -129,17 +136,45 @@ static double calibrate_zero(void)
 }
 
 /* File holds: zero, forward stop raw, back stop raw. stops[] gets the stops measured from the zero. */
+/* Balance-point calibration (no stopper): average 3 s of raw pitch while the robot is held balanced. */
+static double calibrate_balance(void)
+{
+    printf("Hold the robot balanced (or let it balance), keep it still, press X.\n");
+    if (!wait_button(BTN_CAL_FWD)) return NAN;
+    double sum = 0.0, lo = 1e9, hi = -1e9;
+    for (int i = 0; i < 3 * CAL_SAMPLES && running; i++) {
+        double p = raw_pitch();
+        sum += p; if (p < lo) lo = p; if (p > hi) hi = p;
+        struct timespec d = { 0, 10000000L };
+        nanosleep(&d, NULL);
+    }
+    double zero = sum / (3 * CAL_SAMPLES);
+    printf("  balance point %+.3f deg (moved %.2f deg)\n", zero, hi - lo);
+    if (hi - lo > 2.0 * CAL_MAX_SPREAD) { printf("  moved too much, not saved. Try again.\n"); return NAN; }
+    return zero;
+}
+
+static void save_zero_only(double zero)
+{
+    FILE *z = fopen(ZERO_FILE, "w");
+    if (z) { fprintf(z, "%.4f nan nan\n", zero); fclose(z); printf("Saved zero %+.3f deg to %s (no stops)\n", zero, ZERO_FILE); }
+    else perror(ZERO_FILE);
+}
+
 static double load_zero(double stops[2])
 {
     double zero, f, b;
     stops[0] = STOP_FWD_RAW_DEG  - PITCH_ZERO_DEFAULT_DEG;
     stops[1] = STOP_BACK_RAW_DEG - PITCH_ZERO_DEFAULT_DEG;
     FILE *z = fopen(ZERO_FILE, "r");
-    if (z && fscanf(z, "%lf %lf %lf", &zero, &f, &b) == 3 && isfinite(zero) && isfinite(f) && isfinite(b)) {
+    if (z && fscanf(z, "%lf %lf %lf", &zero, &f, &b) == 3 && isfinite(zero)) {
         fclose(z);
-        stops[0] = f - zero;
+        stops[0] = f - zero;      /* NAN when the file has no stops */
         stops[1] = b - zero;
-        printf("Pitch zero %+.3f deg, stops %+.2f / %+.2f (from %s)\n", zero, stops[0], stops[1], ZERO_FILE);
+        if (isfinite(f) && isfinite(b))
+            printf("Pitch zero %+.3f deg, stops %+.2f / %+.2f (from %s)\n", zero, stops[0], stops[1], ZERO_FILE);
+        else
+            printf("Pitch zero %+.3f deg, no stops saved: block-rest trip off (from %s)\n", zero, ZERO_FILE);
         return zero;
     }
     if (z) fclose(z);
@@ -174,9 +209,12 @@ static void shutdown_hw(void)
 int main(int argc, char **argv)
 {
     const char *dev = NULL;
-    int cal = 0;
+    int cal = 0, cal_bal = 0, have_zero = 0;
+    double typed_zero = 0.0;
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--cal") == 0) cal = 1;
+        else if (strcmp(argv[i], "--cal-balance") == 0) cal_bal = 1;
+        else if (strcmp(argv[i], "--zero") == 0 && i + 1 < argc) { typed_zero = atof(argv[++i]); have_zero = 1; }
         else dev = argv[i];
     }
     const char *err = NULL;
@@ -204,6 +242,17 @@ int main(int argc, char **argv)
     motors_off();
     double pitch_zero = PITCH_ZERO_DEFAULT_DEG;
     double stops[2] = { 0, 0 };
+    if (have_zero) {
+        save_zero_only(typed_zero);
+        shutdown_hw();
+        return 0;
+    }
+    if (cal_bal) {
+        pitch_zero = calibrate_balance();
+        if (isfinite(pitch_zero)) save_zero_only(pitch_zero);
+        shutdown_hw();
+        return isfinite(pitch_zero) ? 0 : 1;
+    }
     if (cal) {
         pitch_zero = calibrate_zero();
         shutdown_hw();

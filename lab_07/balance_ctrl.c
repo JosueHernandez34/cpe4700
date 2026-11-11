@@ -14,6 +14,7 @@ void ctrl_init(ctrl_t *c)
     c->tripped = 0;
     c->in_band_ms = 0;
     c->block_rest_ms = 0;
+    c->stops_valid = 1;
     c->stop_fwd  = STOP_FWD_RAW_DEG  - PITCH_ZERO_DEFAULT_DEG;
     c->stop_back = STOP_BACK_RAW_DEG - PITCH_ZERO_DEFAULT_DEG;
 }
@@ -23,6 +24,9 @@ void ctrl_set_stops(ctrl_t *c, double fwd, double back)
     if (isfinite(fwd) && isfinite(back)) {
         c->stop_fwd = fwd;
         c->stop_back = back;
+        c->stops_valid = 1;
+    } else {
+        c->stops_valid = 0;
     }
 }
 
@@ -73,7 +77,7 @@ int ctrl_update(ctrl_t *c, const ctrl_in_t *in, ctrl_out_t *out)
     /* Block-rest trip: resting against a stop (Lab 05 v2). */
     double hi = c->stop_fwd > c->stop_back ? c->stop_fwd : c->stop_back;
     double lo = c->stop_fwd > c->stop_back ? c->stop_back : c->stop_fwd;
-    int near_block = in->pitch >= hi - NEAR_BLOCK_DEG || in->pitch <= lo + NEAR_BLOCK_DEG;
+    int near_block = c->stops_valid && (in->pitch >= hi - NEAR_BLOCK_DEG || in->pitch <= lo + NEAR_BLOCK_DEG);
     if (near_block && fabs(in->pitch_rate) < NEAR_BLOCK_RATE) {
         if (++c->block_rest_ms >= BLOCK_REST_MS) {
             c->tripped = 1;

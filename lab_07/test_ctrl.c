@@ -104,6 +104,11 @@ int main(void)
     CHECK(!c.tripped, "balancing still at theta0 does not trip");
     in.pitch_rate = 0;
 
+    /* No stops saved (stopper removed): the block-rest trip is off, balancing near any angle is fine. */
+    c = armed_ctrl(); ctrl_set_stops(&c, NAN, NAN); in.pitch = THETA0_DEG; in.pitch_rate = 0;
+    for (int i = 0; i < 3 * BLOCK_REST_MS; i++) ctrl_update(&c, &in, &o);
+    CHECK(!c.tripped && !c.stops_valid, "no stops: block-rest trip is off");
+
     /* Tip-over: cuts the motors and latches, even if the pitch returns. */
     c = armed_ctrl(); in.pitch = CUT_FWD_DEG + 1; ctrl_update(&c, &in, &o);
     CHECK(c.tripped && o.left == 0.0 && o.right == 0.0, "tip-over cuts both motors");
