@@ -200,6 +200,23 @@ Josue replaced the gamepad because the earlier one was not working (the ZhiXu pa
   The 28 s run is the first sustained balance on this robot in Lab 07 (Lab 05's best hold was 21.9 s). Both runs ended falling forward with the PWM at or near the clamp. The fast ripple (about 6 Hz) is the same one seen in Lab 05 and fits the estimated 70 to 80 ms loop lag.
 - Earlier runs at 14:08 to 14:12 (Kp 0.015, Ki 0, Kd 0 and 0.005, sticks on, older code) logged target speeds of +/-2000 edges/s and left/right PWM differences up to 0.16, so the sticks worked then.
 
+### Tuning window (`sudo -E ./lab07 --gui`), 11/11
+- Sliders and number boxes for balance angle, Kp, Ki, Kd and Kv change them while the robot runs; status readout (waiting / armed / LIVE / TRIPPED, pitch, speed, duty); Re-arm after a trip (the run continues); Reset to defaults; every change is written to `lab07_<time>_gui_changes.csv`. Run it on the Jetson's own screen (`sudo -E` keeps the display settings). Off-robot checks: 47 pass. Not yet run on the robot.
+
+### Gain comparison from the logged runs (11/11, wheels on the floor, balance in place, theta0 2)
+Every log so far has Ki = 0: **no run with all three of P, I and D exists yet.**
+
+| Gains (Kp / Ki / Kd) | Runs | Live time | Longest hold within +/-5 deg of target | Pitch std | Time at 0.60 clamp | Ripple | How it ended |
+|---|---|---|---|---|---|---|---|
+| 0.015 / 0 / 0 | 140831, 140858, 141203 | 10.6, 45.8, 23.7 s | 10.5, 44.9, 23.4 s | 1.1 to 1.15 deg | 0 % | slow wobble, period 1.9 s (140858), speed std about 390 edges/s | fell backward to -12.6 to -14.9 deg at duty only 0.30 to 0.33 |
+| 0.015 / 0 / 0.005 | 141458, 141521 | 5.5, 28.3 s | 4.7, 28.3 s | 1.6 to 3.0 deg | 0.1 to 0.7 % | 0.17 s period (about 6 Hz), speed std 830 | fell forward to +12 to +15 deg, duty 0.46 to 0.60 |
+| 0.015 / 0 / 0.005, sticks on (`_drive`) | 141824, 141903 | 10.5, 37.4 s | 3.7, 8.2 s | 2.7 to 2.95 deg | 10 to 11 % | 0.19 s period | cutoff at +14.5 (duty 0.56) and -14.3 (duty 0.60) |
+
+- P only held the robot best: the 44.9 s hold is the longest in any lab, with low spread and no clamping. Adding Kd 0.005 made the pitch noisier (6 Hz ripple, speed noise doubled) and shorter holds. This matches Lab 05, where Kd 0.015 chattered; the estimated 70 to 80 ms loop lag (10 ms rate window, 0.3 filter, 40 ms motor) is the likely cause. Next test: Kd 0.001 to 0.002.
+- The mean pitch while live was +1.4 to +2.2 deg in the balance-in-place runs, close to the 2 deg target.
+- Falls were sudden (0.1 to 0.9 s from inside +/-3 deg to the cutoff), so they were not slow drifts; the cause is not known. The P-only falls were backward at only 0.3 duty, so a higher Kp (0.02) is worth a try.
+- Stick runs: commands of -2000 to 0 and 0 to +2000 edges/s; steering was used very little (left/right PWM differed by at most 0.036). Holds were shorter than in place (3.7 and 8.2 s), but these are two runs only.
+
 ### Still to do
 Motor polarity and sensor results, tuning (P only, then P+D, then P+D+I, with Kp, Ki, Kd recorded for each), required runs (stationary balance, forward, reverse, left turn, right turn, small-disturbance recovery), plots (`python3 plot_lab07.py lab07_*.csv`), wireless gamepad.
 
