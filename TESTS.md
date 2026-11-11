@@ -206,6 +206,14 @@ Josue replaced the gamepad because the earlier one was not working (the ZhiXu pa
 ### Angle and gains from the command line
 `sudo ./lab07 --theta0 3 --kp 0.02 --ki 0 --kd 0.002 --kv 0` (add `--drive` for the sticks, `--gui` for the window). The log name now contains the angle and the gains, for example `lab07_<time>_th3_kp0.02_ki0_kd0.002.csv`. An angle within 2.5 deg of a block stop, or beyond half the cutoff, is refused before anything starts (with the saved stops +/-7.81 deg the allowed range is -5.31 to +5.31 deg).
 
+### Angle sweep runs (14:26 to 14:34, `--theta0` from -4 to +3, Kp 0.02 to 0.03, Ki 0) and the "is the polarity off?" question
+- Josue reported: at different angles the robot barely moves, and with a negative angle it keeps moving forward even when it sits at a positive angle.
+- Evidence the control polarity is right: in every run pitch and PWM correlate +0.73 to +0.96 (forward lean gives forward duty), wheel speed follows the PWM (+0.42 to +0.98), and the same law held the robot for 45 s at theta0 = 2 and 51 s at theta0 = 0.
+- In every run the mean pitch while live equals the target (target +3 gave +2.9 and +3.2; -2 gave -1.8 to -3.4; -4 gave -3.0 to -3.5) with mean PWM near 0. That is partly by construction: the motors only go live after the robot is held within +/-2 deg of the target for 0.5 s.
+- The best no-drift run is theta0 = 0 (51 s, mean PWM 0.000, mean wheel speed -1 edges/s, mean pitch -0.2): the saved zero (midpoint of the stops) is already close to the real balance point.
+- A tilt other than the real balance point cannot be held still; the wheels must keep accelerating toward the lean, so large angle offsets make the robot drive off or fall (speed at the end of the runs was +/-1000 to 1800 edges/s).
+- Still unconfirmed by eye: that positive pitch is a lean toward the robot's front and positive duty drives it forward.
+
 ### Gain comparison from the logged runs (11/11, wheels on the floor, balance in place, theta0 2)
 Every log so far has Ki = 0: **no run with all three of P, I and D exists yet.**
 
