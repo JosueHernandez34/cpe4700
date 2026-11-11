@@ -95,6 +95,14 @@ int main(void)
     for (int i = 0; i < 60000; i++) ctrl_update(&c, &in, &o);
     CHECK(fabs(KI * c.integral) <= I_LIMIT + 1e-9, "integral term stays within I_LIMIT");
 
+    /* Gains can be overridden at run time (P only, then P+D, then P+D+I). */
+    c = armed_ctrl(); c.kd = 0.0; c.ki = 0.0; in.pitch = THETA0_DEG + 3; in.pitch_rate = 50;
+    ctrl_update(&c, &in, &o);
+    CHECK(fabs(o.pid_output - KP * 3.0) < 1e-3 && c.integral == 0.0, "P only: no D or I contribution");
+    c = armed_ctrl(); c.kd = 0.01; c.ki = 0.0; in.pitch = THETA0_DEG; in.pitch_rate = 10; ctrl_update(&c, &in, &o);
+    CHECK(fabs(o.pid_output - 0.01 * 10.0) < 1e-3, "overridden Kd is used");
+    in.pitch_rate = 0;
+
     /* Block rest: sitting near a stop, hardly moving, for 1 s cuts the motors; moving does not. */
     c = armed_ctrl(); in.pitch = c.stop_fwd - 1.0; in.pitch_rate = 0;
     for (int i = 0; i < BLOCK_REST_MS - 2; i++) ctrl_update(&c, &in, &o);

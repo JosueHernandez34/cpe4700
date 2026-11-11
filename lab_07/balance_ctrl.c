@@ -8,6 +8,9 @@ static double clamp(double x, double lim)
 
 void ctrl_init(ctrl_t *c)
 {
+    c->kp = KP;
+    c->ki = KI;
+    c->kd = KD;
     c->integral = 0.0;
     c->speed_cmd = 0.0;
     c->armed = 0;
@@ -107,12 +110,14 @@ int ctrl_update(ctrl_t *c, const ctrl_in_t *in, ctrl_out_t *out)
 
     /* P, I and D written out. Derivative is on the measurement: de/dt = -pitch_rate
      * (the target moves slowly, so this avoids a kick when the speed command steps). */
-    double p = KP * out->error;
+    double p = c->kp * out->error;
     c->integral += out->error * LOOP_MS_DT;
-    if (KI > 0.0)
-        c->integral = clamp(c->integral, I_LIMIT / KI);   /* anti-windup */
-    double i = KI * c->integral;
-    double d = KD * (-in->pitch_rate);
+    if (c->ki > 0.0)
+        c->integral = clamp(c->integral, I_LIMIT / c->ki);   /* anti-windup */
+    else
+        c->integral = 0.0;
+    double i = c->ki * c->integral;
+    double d = c->kd * (-in->pitch_rate);
     out->pid_output = DRIVE_SIGN * (p + i + d);
 
     /* Lab 04 deadband compensation, ramped through zero. */

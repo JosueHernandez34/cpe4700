@@ -62,6 +62,7 @@ _Static_assert(THETA0_DEG < (STOP_FWD_RAW_DEG - PITCH_ZERO_DEFAULT_DEG) - NEAR_B
 #define LOOP_MS_DT      ROBOT_LOOP_PERIOD_S
 
 typedef struct {
+    double kp, ki, kd;    /* gains in force (start at KP, KI, KD from robot_params.h; lab07 --kp/--ki/--kd override) */
     double integral;      /* deg * s */
     double speed_cmd;     /* edges/s, signed */
     int    armed;

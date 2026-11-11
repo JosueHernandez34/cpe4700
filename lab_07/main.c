@@ -5,6 +5,11 @@
  *           Right stick left/right steer (neutral when released)
  *           B  stop: zero the speed and steering until both sticks are centred again
  *           START  exit
+ * Gains: defaults are Kp/Ki/Kd in robot_params.h. For tuning, override them without rebuilding:
+ *   sudo ./lab07 --kp 0.015 --ki 0 --kd 0       P only
+ *   sudo ./lab07 --kp 0.015 --ki 0 --kd 0.005   P + D
+ *   sudo ./lab07 --kp 0.015 --ki 0.005 --kd 0.005   P + D + I (the defaults)
+ * The gains used are printed and put in the CSV file name.
  *           (check the mapping with no motors: make joystick_test && sudo ./joystick_test)
  * Gains, limits and safety values are in balance_ctrl.h (TUNING BLOCK).
  *
@@ -219,10 +224,14 @@ int main(int argc, char **argv)
 {
     const char *dev = NULL;
     int cal = 0, cal_bal = 0, have_zero = 0;
+    double kp = KP, ki = KI, kd = KD;
     double typed_zero = 0.0;
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--cal") == 0) cal = 1;
         else if (strcmp(argv[i], "--cal-balance") == 0) cal_bal = 1;
+        else if (strcmp(argv[i], "--kp") == 0 && i + 1 < argc) kp = atof(argv[++i]);
+        else if (strcmp(argv[i], "--ki") == 0 && i + 1 < argc) ki = atof(argv[++i]);
+        else if (strcmp(argv[i], "--kd") == 0 && i + 1 < argc) kd = atof(argv[++i]);
         else if (strcmp(argv[i], "--zero") == 0 && i + 1 < argc) { typed_zero = atof(argv[++i]); have_zero = 1; }
         else dev = argv[i];
     }
@@ -272,9 +281,11 @@ int main(int argc, char **argv)
         pitch_zero = load_zero(stops);
     }
 
-    char fname[64];
+    char fname[128];
     time_t wall = time(NULL);
-    strftime(fname, sizeof fname, "lab07_%Y%m%d_%H%M%S.csv", localtime(&wall));
+    char stamp[32];
+    strftime(stamp, sizeof stamp, "%Y%m%d_%H%M%S", localtime(&wall));
+    snprintf(fname, sizeof fname, "lab07_%s_kp%g_ki%g_kd%g.csv", stamp, kp, ki, kd);
     FILE *log = fopen(fname, "w");
     if (!log) { perror(fname); shutdown_hw(); return 1; }
     fprintf(log, "time_ms,target_speed,measured_speed,pitch_deg,pitch_target_deg,error_deg,pid_output,left_pwm,right_pwm\n");
@@ -286,6 +297,8 @@ int main(int argc, char **argv)
     ctrl_t c;
     ctrl_init(&c);
     ctrl_set_stops(&c, stops[0], stops[1]);
+    c.kp = kp; c.ki = ki; c.kd = kd;
+    printf("Gains: Kp %g, Ki %g, Kd %g\n", kp, ki, kd);
     int prev_b = 0, was_live = 0, stopped = 0;
 
     double pitch = raw_pitch() - pitch_zero;
