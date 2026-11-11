@@ -57,7 +57,8 @@
 #define ROBOT_BLOCK_REST_MS        1000     /* ms of resting before the trip */
 #define ROBOT_RATE_WINDOW_STEPS    10       /* pitch rate = change over 10 ms (the IMU updates at 100 Hz) */
 #define ROBOT_RATE_FILTER          0.3      /* weight of each new rate sample (Lab 05) */
-#define ROBOT_IMU_STALE_MS         200      /* a pitch exactly unchanged this long = IMU read failure (get_imu_pitch returns 0.0 on failure) */
+/* get_imu_pitch() returns 0.0 on a failed read; that becomes a pitch near 175 deg, which trips the cutoff. (A pitch that repeats
+ * exactly is normal at rest, so no frozen-value check is used.) */
 
 /* ============================== Balance gains (Lab 05, PID on pitch) ============================== */
 /* Only these held the robot in Lab 05 (21.9 s and 12.6 s holds at the 0.60 limit). */

@@ -48,7 +48,7 @@ Report: `~/cc_reports/lab05_step1_report.md`.
 Channel session "11/11 - Jetson wireless gamepad bring-up". Nothing was changed on the system.
 - Kernel: `BT_HIDP=m`, `UHID=m`, `HID_GENERIC=y`, `INPUT_EVDEV=y`, `INPUT_JOYDEV=m`. No `hid_nintendo`, so a Switch-style mode will not work without extra setup.
 - Adapter hci0 (Realtek, USB 13d3:3549, Bluetooth 5.1, BLE capable): up, not blocked, `Pairable: no`, nothing paired.
-- Input devices present: Compx 2.4G Receiver (25a7:fa61, keyboard and mouse dongle, not the gamepad) and WaveShare WS170120 touchscreen (0eef:0005). The gamepad was not plugged in.
+- Input devices present on 11/11 (before the pad was plugged in): Compx 2.4G Receiver (25a7:fa61, keyboard and mouse dongle, not the gamepad) and WaveShare WS170120 touchscreen (0eef:0005). The gamepad was not plugged in.
 - Not done: wired baseline, wireless pairing modes. Status: waiting on Josue (controller manual and wired baseline).
 - Earlier (10/26): adapter up, nothing paired, a 15 s scan saw no gamepad (controller probably not in pairing mode).
 
@@ -158,6 +158,11 @@ They cover: motors off before the 0.5 s arming hold and live after; forward lean
 - `sudo ./lab07 --cal` ran on the robot: forward stop +12.81, back stop -2.81, zero +4.997 (see "Mechanical stops").
 - Josue reported the sensor and motor-direction checks (handout steps 1 and 2) done. The results (pitch sign, encoder sign, motor direction) were not recorded in the channel or on the Jetson at the time this file was written. **Add them here.**
 - No `lab07_*.csv` run files existed on the Jetson at that time, so no balance run has been logged yet.
+
+### 11/11 first robot runs of `sudo ./lab07`: nothing happened
+- Four runs (13:50 to 13:52) left header-only CSVs (`lab07_20261111_1350*.csv`, `..._1351*.csv`, `..._135212.csv`, 103 bytes each, root-owned), meaning the program ended before the first 20 ms row.
+- Cause (my code): before arming, a pitch outside +/-15 deg was treated as a tip-over and ended the run; a "frozen IMU" check could also fire on a robot at rest (the IMU repeats exact values, the back stop read "moved 0.00 deg" for 1 s). Both removed: out-of-range pitch before arming now just keeps the motors off, and a failed IMU read (pitch near 175 deg) trips the cutoff once armed. A status line now prints every second (pitch, speed, waiting / armed / LIVE).
+- The gamepad seen on 11/11 is a "ZhiXu Gamepad" (USB 0079:181c, `/dev/input/event11`, js0), keys 0x130 to 0x13e, axes X Y Z RZ GAS BRAKE and HAT0X/HAT0Y. Josue reports X and Y are swapped compared with the Lab 06 codes (X = BTN_WEST). Calibration now accepts either BTN_WEST or BTN_NORTH as X.
 
 ### Still to do
 Motor polarity and sensor results, tuning (P only, then P+D, then P+D+I, with Kp, Ki, Kd recorded for each), required runs (stationary balance, forward, reverse, left turn, right turn, small-disturbance recovery), plots (`python3 plot_lab07.py lab07_*.csv`), wireless gamepad.

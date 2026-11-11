@@ -47,11 +47,11 @@
 #define PITCH_ZERO_DEG ROBOT_PITCH_RAW_UPRIGHT_DEG
 #define RATE_WINDOW_STEPS ROBOT_RATE_WINDOW_STEPS
 #define RATE_FILTER    ROBOT_RATE_FILTER
-#define STALE_MS       ROBOT_IMU_STALE_MS
 
 #define BTN_ZERO_SPEED BTN_SOUTH  /* B */
 #define BTN_EXIT       BTN_START
-#define BTN_CAL_FWD    BTN_WEST   /* X: record the forward stop (calibration only) */
+#define BTN_CAL_FWD    BTN_WEST   /* X on the Lab 06 pad (calibration only) */
+#define BTN_CAL_FWD_ALT BTN_NORTH /* X on pads that report X and Y the other way round (ZhiXu pad, 11/11) */
 #define BTN_CAL_BACK   BTN_SOUTH  /* B: record the back stop (calibration only) */
 #define ZERO_NAME      "pitch_zero.txt"   /* stored next to the lab07 program, wherever it is run from */
 #define CAL_SAMPLES    100        /* 1 s of 10 ms samples */
@@ -116,13 +116,15 @@ static int sample_stop(double *mean)
     return (hi - lo) <= CAL_MAX_SPREAD ? 0 : -1;
 }
 
+static int btn_x(void) { return gp_get_button(BTN_CAL_FWD) || gp_get_button(BTN_CAL_FWD_ALT); }
+
 static int wait_button(int code)
 {
-    while (running && gp_is_connected() && !gp_get_button(code)) {
+    while (running && gp_is_connected() && !(code == BTN_CAL_FWD ? btn_x() : gp_get_button(code))) {
         struct timespec d = { 0, 10000000L };
         nanosleep(&d, NULL);
     }
-    while (running && gp_get_button(code)) {          /* wait for release */
+    while (running && (code == BTN_CAL_FWD ? btn_x() : gp_get_button(code))) {          /* wait for release */
         struct timespec d = { 0, 10000000L };
         nanosleep(&d, NULL);
     }
@@ -295,8 +297,9 @@ int main(int argc, char **argv)
     int prev_up = 0, prev_down = 0, prev_b = 0, was_live = 0;
 
     double pitch = raw_pitch() - pitch_zero;
-    double pitch_at_window = pitch, rate = 0.0, last_raw = 1e9;
-    int window_count = 0, same_ms = 0;
+    double pitch_at_window = pitch, rate = 0.0;
+    int window_count = 0;
+    long next_status_ms = 0;
 
     struct timespec start, next;
     clock_gettime(CLOCK_MONOTONIC, &start);
@@ -317,12 +320,10 @@ int main(int argc, char **argv)
         if (b && !prev_b) ctrl_zero_speed(&c);
         prev_b = b;
 
-        /* 2. Measurements. get_imu_pitch() returns 0.0 on a failed read, so a value that
-         * never changes is treated as a failure. */
+        /* 2. Measurements. get_imu_pitch() returns 0.0 on a failed read, which becomes a pitch of about
+         * 175 deg here, so a failed read trips the cutoff and cuts the motors. (A pitch that repeats
+         * exactly is normal at rest: the IMU resolution is 1/16 deg.) */
         double raw = get_imu_pitch();
-        if (raw == last_raw) same_ms++; else same_ms = 0;
-        last_raw = raw;
-        if (same_ms > STALE_MS) { err = "IMU value frozen (read failure)"; break; }
         pitch = wrap180(PITCH_ZERO_DEG - raw) - pitch_zero;   /* deg from the calibrated zero */
         if (++window_count >= RATE_WINDOW_STEPS) {
             double r = (pitch - pitch_at_window) / (RATE_WINDOW_STEPS * LOOP_MS_DT);
@@ -347,6 +348,11 @@ int main(int argc, char **argv)
 
         /* 4. One row every 20 ms. */
         long t_ms = elapsed_ms(&start);
+        if (t_ms >= next_status_ms) {
+            printf("t %4.0f s  pitch %+6.2f deg (target %+.1f)  speed %+7.0f edges/s  %s\n", t_ms / 1000.0, pitch,
+                   out.pitch_target, speed, live ? "LIVE" : (c.armed ? "armed" : "waiting: hold the robot near the target"));
+            next_status_ms += 1000;
+        }
         if (t_ms >= next_log_ms) {
             fprintf(log, "%ld,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f,%.3f\n", t_ms, c.speed_cmd,
                     speed, pitch, out.pitch_target, out.error, out.pid_output, (double)l, (double)r);

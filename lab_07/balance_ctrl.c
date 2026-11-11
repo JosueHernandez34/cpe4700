@@ -54,8 +54,11 @@ int ctrl_update(ctrl_t *c, const ctrl_in_t *in, ctrl_out_t *out)
     out->left = 0.0;
     out->right = 0.0;
 
-    /* Safety: tip-over latches the motors off. */
-    if (c->tripped || !isfinite(in->pitch) || in->pitch > CUT_FWD_DEG || in->pitch < -CUT_BACK_DEG) {
+    /* Safety: a cutoff beyond the limits (or a non-finite pitch) latches the motors off once they are
+     * armed. Before arming the motors are already off, so a robot that is tilted or being carried
+     * simply stays off until it is held near theta0. */
+    int beyond = !isfinite(in->pitch) || in->pitch > CUT_FWD_DEG || in->pitch < -CUT_BACK_DEG;
+    if (c->tripped || (c->armed && beyond)) {
         c->tripped = 1;
         c->armed = 0;
         c->integral = 0.0;

@@ -109,6 +109,11 @@ int main(void)
     for (int i = 0; i < 3 * BLOCK_REST_MS; i++) ctrl_update(&c, &in, &o);
     CHECK(!c.tripped && !c.stops_valid, "no stops: block-rest trip is off");
 
+    /* Before arming, a tilted robot just stays off; it does not trip or end the run. */
+    ctrl_init(&c); in.pitch = CUT_FWD_DEG + 20; in.pitch_rate = 0;
+    live = ctrl_update(&c, &in, &o);
+    CHECK(!live && !c.tripped && o.left == 0.0, "tilted before arming: motors off, no trip");
+
     /* Tip-over: cuts the motors and latches, even if the pitch returns. */
     c = armed_ctrl(); in.pitch = CUT_FWD_DEG + 1; ctrl_update(&c, &in, &o);
     CHECK(c.tripped && o.left == 0.0 && o.right == 0.0, "tip-over cuts both motors");
