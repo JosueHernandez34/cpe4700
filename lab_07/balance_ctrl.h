@@ -11,59 +11,47 @@
  * Speed convention: encoder A-edges per second, forward positive.
  */
 
-/* ---- TUNING BLOCK: every value to adjust lives here ---- */
-#define THETA0_DEG      2.0      /* balance angle (deg from the calibrated zero); 2 because the robot is back-heavy (Josue 11/11) */
+#include "robot_params.h"
 
-#define KP              0.015    /* duty per deg          (Lab 05 default) */
-#define KI              0.005    /* duty per (deg * s)    (Lab 05 default) */
-#define KD              0.005    /* duty per (deg / s)    (Lab 05 default) */
+/* ---- TUNING BLOCK ----
+ * Robot-wide measured values (gains, angles, stops, cutoff, deadband, limits) live in
+ * ~/dev/cpe4700/modules/robot_params.h. Change them there. They are mapped to the short names this
+ * lab uses below. Values that only Lab 07 needs are defined here. */
+#define THETA0_DEG          ROBOT_BALANCE_ANGLE_DEG
+#define KP                  ROBOT_KP
+#define KI                  ROBOT_KI
+#define KD                  ROBOT_KD
+#define DRIVE_SIGN          ROBOT_DRIVE_SIGN
+#define MAX_DUTY            ROBOT_MAX_DUTY
+#define STOP_FWD_RAW_DEG    ROBOT_STOP_FWD_RAW_DEG
+#define STOP_BACK_RAW_DEG   ROBOT_STOP_BACK_RAW_DEG
+#define PITCH_ZERO_DEFAULT_DEG ROBOT_PITCH_ZERO_DEG
+#define CUT_FWD_DEG         ROBOT_CUTOFF_FWD_DEG
+#define CUT_BACK_DEG        ROBOT_CUTOFF_BACK_DEG
+#define CUTOFF_MIN_DEG      ROBOT_CUTOFF_MIN_DEG
+#define CUTOFF_MAX_DEG      ROBOT_CUTOFF_MAX_DEG
+#define DEADBAND_DUTY       ROBOT_DEADBAND_DUTY
+#define DEADBAND_RAMP       ROBOT_DEADBAND_RAMP
+#define NEAR_BLOCK_DEG      ROBOT_NEAR_BLOCK_DEG
+#define NEAR_BLOCK_RATE     ROBOT_NEAR_BLOCK_RATE
+#define BLOCK_REST_MS       ROBOT_BLOCK_REST_MS
+
+/* Lab 07 only. */
 #define I_LIMIT         0.15     /* anti-windup: |Ki * integral| never above this (duty) */
-
-/* Lab 05 drove +duty when leaning forward: u = DRIVE_SIGN * (Kp e + Ki int(e) + Kd de/dt)
- * with e = theta_target - theta, so DRIVE_SIGN is -1. Flip if the wheels run away from a lean. */
-#define DRIVE_SIGN     -1.0
-
 #define KV              0.0010   /* deg of pitch target per (edges/s) of speed error */
 #define PITCH_TARGET_RANGE 3.0   /* pitch target stays within theta0 +/- this (deg) */
-
 #define SPEED_STEP      200.0    /* edges/s per d-pad press */
 #define SPEED_MAX       2000.0   /* edges/s, clamp on the speed command */
 #define STEER_DUTY      0.08     /* duty difference between the wheels for a steering press */
 
-#define MAX_DUTY        0.60     /* final clamp on both PWM commands (Labs 05 and 06) */
-
-/* Pitch zero (Lab 05 v2 rule, Josue 10/26): the zero is the midpoint of the IMU readings at the
- * forward and back block stops, found by moving the robot to both ends and averaging. Every angle in
- * this program (theta0, cutoff, logged pitch) is measured from that zero, so the stops sit at
- * +/- half their span. main.c measures the stops with "lab07 --cal" and saves the zero; these are the
- * Lab 05 readings (10/26), used until a calibration file exists. */
-#define STOP_FWD_RAW_DEG    11.25    /* IMU reading (0 upright raw frame) resting on the forward stop */
-#define STOP_BACK_RAW_DEG   -3.56    /* ... and on the back stop */
-#define PITCH_ZERO_DEFAULT_DEG  (0.5 * (STOP_FWD_RAW_DEG + STOP_BACK_RAW_DEG))   /* +3.845 */
-
-/* Cutoff (Lab 05 v2 default, Josue 10/26): +/-15 deg from the zero. The stops are inside it, so it
- * only trips on a fall past the stops or a dead IMU (reads 180). Allowed range 2 to 30 deg. */
-#define CUT_FWD_DEG     15.0
-#define CUT_BACK_DEG    15.0
-#define CUTOFF_MIN_DEG  2.0
-#define CUTOFF_MAX_DEG  30.0
+/* Pitch zero rule (Lab 05 v2): see robot_params.h. "lab07 --cal" measures the stops and saves the zero;
+ * the defaults there are used until pitch_zero.txt exists. */
 _Static_assert(CUT_FWD_DEG >= CUTOFF_MIN_DEG && CUT_FWD_DEG <= CUTOFF_MAX_DEG &&
-               CUT_BACK_DEG >= CUTOFF_MIN_DEG && CUT_BACK_DEG <= CUTOFF_MAX_DEG, "cutoff outside 2..30 deg");
+               CUT_BACK_DEG >= CUTOFF_MIN_DEG && CUT_BACK_DEG <= CUTOFF_MAX_DEG, "cutoff outside the allowed range");
 /* Lab 05 rule: the pitch target stays inside half of the smaller cutoff. */
 _Static_assert(THETA0_DEG <= 0.5 * (CUT_FWD_DEG < CUT_BACK_DEG ? CUT_FWD_DEG : CUT_BACK_DEG),
                "theta0 must be inside half of the smaller cutoff");
-/* Lab 04 deadband: wheels do not move until |duty| is about 0.06 (W0 +0.06/-0.06, W1 +0.06/-0.04).
- * Added to every nonzero output, ramped in over DEADBAND_RAMP so noise at zero does not chatter. */
-#define DEADBAND_DUTY   0.06
-#define DEADBAND_RAMP   0.02
-
-/* Block-rest trip (Lab 05 v2): within NEAR_BLOCK_DEG of a stop and moving slower than
- * NEAR_BLOCK_RATE for BLOCK_REST_MS means the robot is resting on the block, so stop pushing into it.
- * (Lab 05's 5 s lift window is not needed: the arming step below already requires the robot to be
- * held off the blocks, near theta0.) */
-#define NEAR_BLOCK_DEG  2.5
-#define NEAR_BLOCK_RATE 5.0      /* deg/s */
-#define BLOCK_REST_MS   1000
+/* The block-rest trip (Lab 05 v2) needs theta0 outside the near-block zone, or balancing would look like resting. */
 _Static_assert(THETA0_DEG < (STOP_FWD_RAW_DEG - PITCH_ZERO_DEFAULT_DEG) - NEAR_BLOCK_DEG &&
                THETA0_DEG > (STOP_BACK_RAW_DEG - PITCH_ZERO_DEFAULT_DEG) + NEAR_BLOCK_DEG,
                "theta0 must be outside the near-block zone");
@@ -71,7 +59,7 @@ _Static_assert(THETA0_DEG < (STOP_FWD_RAW_DEG - PITCH_ZERO_DEFAULT_DEG) - NEAR_B
 #define ARM_BAND_DEG    2.0      /* motors stay off until |pitch - theta0| is within this ... */
 #define ARM_HOLD_MS     500      /* ... for this long */
 
-#define LOOP_MS_DT      0.001    /* s, control loop period */
+#define LOOP_MS_DT      ROBOT_LOOP_PERIOD_S
 
 typedef struct {
     double integral;      /* deg * s */

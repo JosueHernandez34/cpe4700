@@ -9,6 +9,7 @@ speed error (mean absolute, max), time at the PWM clamp, and overshoot (largest 
 the target after a speed step). With --disturb, also the recovery time: how long after the
 disturbance until |pitch error| stays under 1 degree for 0.5 s.
 Speed is the feedback encoder only, in A-edges/s. Pitch is degrees from the calibrated zero."""
+import os
 import sys
 import numpy as np
 import pandas as pd
@@ -16,8 +17,11 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-MAX_DUTY = 0.60
-DT = 0.020          # log period, s
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "modules"))
+import robot_params as rp          # shared values (modules/robot_params.h)
+
+MAX_DUTY = rp.ROBOT_MAX_DUTY
+DT = rp.ROBOT_LOG_PERIOD_MS / 1000.0   # log period, s
 REC_BAND = 1.0      # deg
 REC_HOLD = 0.5      # s
 

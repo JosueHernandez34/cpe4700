@@ -37,17 +37,17 @@
 #include "imu.h"
 #include "pwm.h"
 
-#define LOOP_NS        1000000L   /* 1 ms control loop */
-#define LOG_MS         20         /* one CSV row every 20 ms */
+#define LOOP_NS        ((long)(ROBOT_LOOP_PERIOD_S * 1e9 + 0.5))
+#define LOG_MS         ROBOT_LOG_PERIOD_MS
 #define CONNECT_WAIT_MS 10000
-#define LEFT_CH        0
-#define RIGHT_CH       1
-#define FEEDBACK_ENC   0          /* encoder used for the speed estimate */
-#define STEER_SIGN     1.0        /* +1: d-pad left turns left; flip if reversed */
-#define PITCH_ZERO_DEG 180.0      /* raw BNO055 reading when upright (Lab 05) */
-#define RATE_WINDOW_STEPS 10      /* pitch rate over 10 ms (the IMU updates about every 10 ms) */
-#define RATE_FILTER    0.3
-#define STALE_MS       200        /* IMU value exactly unchanged this long = read failure */
+#define LEFT_CH        ROBOT_LEFT_CH
+#define RIGHT_CH       ROBOT_RIGHT_CH
+#define FEEDBACK_ENC   ROBOT_FEEDBACK_ENC
+#define STEER_SIGN     ROBOT_STEER_SIGN
+#define PITCH_ZERO_DEG ROBOT_PITCH_RAW_UPRIGHT_DEG
+#define RATE_WINDOW_STEPS ROBOT_RATE_WINDOW_STEPS
+#define RATE_FILTER    ROBOT_RATE_FILTER
+#define STALE_MS       ROBOT_IMU_STALE_MS
 
 #define BTN_ZERO_SPEED BTN_SOUTH  /* B */
 #define BTN_EXIT       BTN_START
